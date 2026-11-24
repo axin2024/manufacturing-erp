@@ -2,7 +2,7 @@
 
 在 Windows x64、PHP 8.2.30、MySQL Community 8.4.13 上从空白数据库执行 14 个迁移。使用回环 PHP 服务运行 HTML 表单、JSON、会话与 CSV 回归。实际 MySQL 事务参与每个业务套件。集成执行共通过 597 项断言，其中 HTTP 250 项，版本扩展 16 项。
 
-在 Ubuntu 24.04 的干净运行器上，Compose 另行构建 PHP 8.4 与 Apache 镜像，等待 MySQL 8.4、迁移、HTTP 健康检查和后台工作进程就绪，再运行同一套回归。[容器验证记录](https://github.com/axin2024/manufacturing-erp/actions/runs/45421982090)
+在 Ubuntu 24.04 的干净运行器上，Compose 另行构建 PHP 8.4 与 Apache 镜像，等待 MySQL 8.4、迁移、HTTP 健康检查和后台工作进程就绪，再运行同一套回归。[容器验证记录](https://github.com/axin2024/manufacturing-erp/actions/workflows/integration.yml)
 
 | 用例 | 实测结果 | 回归代码 |
 | --- | --- | --- |
@@ -33,4 +33,4 @@
 
 ## 升级和恢复
 
-以前一应用提交从空库建 12 个迁移，导入演示并关账。在同一库应用第 13 个迁移，使用当前应用读取原账套、供需、实际发货、批次追溯、应收应付、请求回执和关账快照。再用 `mysqldump --single-transaction` 导出到文件并恢复到另一个空库。三次读取的关键字段和关账 SHA-256 完全一致。[恢复原始记录](recovery.json)
+以前一应用提交从空库建 12 个迁移，导入演示、完成一项批量导入并关账。在同一库应用第 13 与第 14 个迁移，使用当前应用读取原账套、供需、实际发货、批次追溯、应收应付、请求回执、任务状态和关账快照。再用 `mysqldump --single-transaction` 导出到文件并恢复到另一个空库。三次读取的关键字段、关账 SHA-256 与原任务执行摘要完全一致。[恢复原始记录](recovery.json)
