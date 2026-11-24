@@ -5,7 +5,6 @@ declare(strict_types=1);
 use ManufacturingErp\BatchWorker;
 use ManufacturingErp\Database;
 use ManufacturingErp\DemoScenario;
-use ManufacturingErp\FiscalClose;
 use ManufacturingErp\Identity;
 use ManufacturingErp\Inventory;
 use ManufacturingErp\MasterData;
@@ -98,6 +97,9 @@ $vendorName = 'Surface finishing plant';
 $supplier = $master->addParty('SURFACE', $vendorName, 'supplier');
 $raw = $master->addLocation('RAW-VENDOR', 'Vendor staging');
 $input = $master->addItem('QA-RAW', 'Inspection blank', 'ea', 'purchase', 100, 0);
+$tradeMaster = new MasterData($db, $identity->scope($adminId, $fixture['trade_org_id']));
+$tradeMaster->addItem('QA-RAW', 'Inspection blank', 'ea', 'purchase', 100, 0);
+$tradeWarehouse = $tradeMaster->addLocation('TRADE-HTTP', 'Inbound group transfers');
 $output = $master->addItem('QA-COATED', 'Coated blank', 'ea', 'subcontract', 200, 0);
 $day = $fixture['as_of'];
 (new ProductEngineering($db, $scope))->publishBom($output, $day, [['item' => $input, 'quantity' => 1000, 'uom' => 'ea']]);
@@ -238,8 +240,54 @@ $finalQC = $client->post('decide-inspection', [...$qcInput, 'version' => 2, 'acc
     'request_key' => 'http-qc-final-' . $tag], $csrf);
 same('completed', $finalQC['body']['state'], 'Latest version disposes of the remaining quantity');
 
-$closed = (new FiscalClose($db, $scope))->close($day);
-same($closed['digest'], $client->get('/?page=finance&period=' . $day)['body']['details']['快照摘要'], 'Financial workspace renders the persisted snapshot digest');
+$apScreen = $client->get('/?page=payables', false);
+same(true, str_contains($apScreen['body'], 'RC-HTTP / HTTP-LOT-A'), 'Invoice matching can select the unmatched receipt by lot');
+$invoiceInput = ['supplier' => $supplier, 'number' => 'AP-HTTP', 'posted_on' => $day, 'due_on' => '2037-06-30',
+    'request_key' => 'http-invoice-' . $tag, 'lines' => [
+        ['receipt_line_id' => $receivedLines[0]['id'], 'amount' => '1.50'],
+        ['receipt_line_id' => $receivedLines[1]['id'], 'amount' => '3.00'],
+    ]];
+$invoice = $client->post('post-purchase-bill', $invoiceInput, $csrf);
+same(201, $invoice['status'], 'Accounts payable matches both receipt lines');
+same(12, $invoice['body']['variance_minor'], 'UI posts the actual procurement price difference');
+same($invoice['body']['bill_id'], $client->post('post-purchase-bill', $invoiceInput, $csrf)['body']['bill_id'], 'Invoice replay keeps its original journal');
+$settleInput = ['id' => $invoice['body']['payable_id'], 'reference' => 'AP-HTTP-PAYMENT', 'amount' => '2.20',
+    'posted_on' => $day, 'request_key' => 'http-settlement-' . $tag];
+$settled = $client->post('settle-open-item', $settleInput, $csrf);
+same(201, $settled['status'], 'Finance can partially settle an open item');
+same(230, $settled['body']['open_minor'], 'Partial settlement preserves outstanding cents');
+same($settled['body']['journal_id'], $client->post('settle-open-item', $settleInput, $csrf)['body']['journal_id'],
+    'Settlement replay cannot deduct twice');
+
+$adjustInput = ['number' => 'ADJUST-HTTP', 'posted_on' => $day, 'reason' => 'Month-end freight correction',
+    'request_key' => 'http-adjustment-' . $tag, 'corrects_journal_id' => $journal,
+    'lines' => [['account' => 'GENERAL_EXPENSE', 'amount' => '1.18'], ['account' => 'BANK', 'amount' => '-1.18']]];
+$adjusted = $client->post('post-adjustment', $adjustInput, $csrf);
+same(201, $adjusted['status'], 'Balanced signed decimal adjustment can be posted');
+same(118, $client->get('/?page=journals&id=' . $adjusted['body']['journal_id'])['body']['tables'][0]['rows'][1]['credit_minor'],
+    'Adjustment view preserves the financial credit');
+same(422, $client->post('post-adjustment', [...$adjustInput, 'lines' => [
+    ['account' => 'GENERAL_EXPENSE', 'amount' => '999999999999999999.99'], ['account' => 'BANK', 'amount' => '-1.18'],
+]], $csrf)['status'], 'Out-of-range decimal is rejected before integer conversion');
+
+$transferPage = $client->get('/?page=intercompany&target=' . $fixture['trade_org_id'], false);
+same(true, str_contains($transferPage['body'], 'TRADE-HTTP'), 'Transfer form can select target warehouse from the authorized ledger');
+same(403, $client->get('/?page=intercompany&target=' . $external['org'])['status'], 'Target picker cannot disclose a foreign ledger’s locations');
+$transferInput = ['number' => 'TRANSFER-HTTP', 'destination' => $fixture['trade_org_id'], 'lot' => $vendorLot,
+    'from' => $raw, 'to' => $tradeWarehouse, 'destination_code' => 'HTTP-TRADE-BATCH', 'quantity' => '0.250', 'posted_on' => $day,
+    'request_key' => 'http-transfer-' . $tag];
+$transfer = $client->post('transfer-between-organizations', $transferInput, $csrf);
+same(201, $transfer['status'], 'Operator posts both intercompany sides');
+same(25, $transfer['body']['amount_minor'], 'Transfer uses exact carrying value');
+same($transfer['body']['destination_lot_id'], $client->post('transfer-between-organizations', $transferInput, $csrf)['body']['destination_lot_id'],
+    'Intercompany retry reuses the destination inventory batch');
+$closed = $client->post('close-period', ['period' => $day], $csrf);
+same(200, $closed['status'], 'Financial period closes through the authorized HTTP action');
+same($closed['body']['digest'], $client->get('/?page=finance&period=' . $day)['body']['details']['快照摘要'],
+    'Financial workspace renders the persisted snapshot digest');
+same($closed['body']['digest'], $client->post('close-period', ['period' => $day], $csrf)['body']['digest'], 'Repeated closing preserves the archived snapshot');
+same(409, $client->post('post-adjustment', [...$adjustInput, 'number' => 'ADJUST-POST-CLOSE',
+    'request_key' => 'http-adjust-closed-' . $tag], $csrf)['status'], 'New posting is refused after closure');
 
 $posted = ['as_of' => '2037-06-01', 'horizon_on' => '2037-06-15', 'request_key' => 'http-mrp-' . $tag];
 $submission = $client->post('calculate-plan', $posted, $csrf);
@@ -257,6 +305,8 @@ same($fixture['trade_org_id'], $change['body']['organization_id'], 'User can sel
 $csrf = $change['body']['csrf'];
 same(404, $client->get('/?page=sales&id=' . $stock['sales_order_id'])['status'], 'Selected trading ledger cannot read a manufacturing order');
 same(404, $client->get($receipt)['status'], 'Same user receives no old receipt while in another organization');
+same('HTTP-TRADE-BATCH', $client->get('/?page=inventory&id=' . $transfer['body']['destination_lot_id'])['body']['title'],
+    'Switching ledgers shows the separately posted inventory batch');
 same(403, $client->post('switch-org', ['org_id' => $external['org']], $csrf)['status'], 'Organization selection does not allow unrelated access');
 
 $warehouse = new WebTestClient($base);

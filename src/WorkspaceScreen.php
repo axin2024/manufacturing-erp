@@ -70,19 +70,18 @@ abstract class WorkspaceScreen extends Service
 
     protected function locations(): array
     {
-        return $this->options($this->db->rows('SELECT id,code,name FROM locations WHERE org_id=? ORDER BY code', [$this->scope->org]), 'code', 'name');
+        return $this->options((new MasterData($this->db, $this->scope))->locations(), 'code', 'name');
     }
 
     protected function parties(string $kind): array
     {
-        return $this->options($this->db->rows("SELECT id,code,name FROM parties WHERE org_id=? AND kind IN (?, 'both') ORDER BY code",
-            [$this->scope->org, $kind]), 'code', 'name');
+        $rows = (new MasterData($this->db, $this->scope))->parties();
+        return $this->options(array_filter($rows, static fn(array $party): bool => in_array($party['kind'], [$kind, 'both'], true)), 'code', 'name');
     }
 
     protected function items(): array
     {
-        return $this->options($this->db->rows('SELECT i.id,i.code,i.name FROM org_items x JOIN items i ON i.id=x.item_id
-            WHERE x.org_id=? ORDER BY i.code', [$this->scope->org]), 'code', 'name');
+        return $this->options((new MasterData($this->db, $this->scope))->items(), 'code', 'name');
     }
 
     protected function link(string $label, string $page, ?int $id = null, array $parameters = []): array

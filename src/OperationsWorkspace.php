@@ -157,7 +157,7 @@ final class OperationsWorkspace extends WorkspaceScreen
         $inventory = new Inventory($this->db, $this->scope);
         if ($id === null) {
             return ['title' => '批次库存', 'tables' => [
-                $this->listTable('库存批次', ['lot_code' => '批号', 'code' => '物料', 'name' => '名称', 'base_uom' => '单位',
+                $this->listTable('库存批次', ['lot_code' => '批号', 'id' => '批次记录编号', 'code' => '物料', 'name' => '名称', 'base_uom' => '单位',
                     'available_milli' => '可用', 'pending_milli' => '待检', 'rework_milli' => '返工', 'rejected_milli' => '拒收',
                     'received_on' => '入库日期'], $inventory->lots($before), 'inventory', 'lot_code'),
             ]];
@@ -169,7 +169,7 @@ final class OperationsWorkspace extends WorkspaceScreen
             $this->link('向下追溯', 'trace', $id, ['direction' => 'downstream']),
         ] : [];
         return ['title' => $lot['lot_code'], 'parent' => ['inventory', '批次库存'], 'links' => $links,
-            'details' => ['物料' => $lot['item_code'] . ' ' . $lot['item_name'], '入库日' => $lot['received_on'],
+            'details' => ['批次记录编号' => $id, '物料' => $lot['item_code'] . ' ' . $lot['item_name'], '入库日' => $lot['received_on'],
                 '来源' => WebView::state($lot['origin_kind']), '原单位' => $lot['source_uom'],
                 '原始数量' => WebView::scaled($lot['source_qty_milli'], 3), '冻结换算' => WebView::scaled($lot['factor_milli'], 3),
                 '换算版本' => $lot['conversion_id'], '原始单位成本' => WebView::scaled($lot['unit_cost_minor'], 2)],

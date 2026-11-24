@@ -71,11 +71,12 @@ final class Value
     {
         self::assert(is_string($value) || is_int($value), '请输入有效数字。');
         $text = (string) $value;
-        self::assert((bool) preg_match('/\A([0-9]{1,10})(?:\.([0-9]{1,' . $precision . '}))?\z/', $text, $parts),
+        self::assert((bool) preg_match('/\A([0-9]{1,18})(?:\.([0-9]{1,' . $precision . '}))?\z/', $text, $parts),
             '数字格式不正确或小数位超限。');
-        $number = (int) $parts[1] * (10 ** $precision) + (int) str_pad($parts[2] ?? '', $precision, '0');
-        self::assert($number <= $maximum, '数字超出范围。');
-        return $number;
+        $digits = ltrim($parts[1] . str_pad($parts[2] ?? '', $precision, '0'), '0');
+        $limit = (string) $maximum;
+        self::assert(strlen($digits) < strlen($limit) || (strlen($digits) === strlen($limit) && strcmp($digits, $limit) <= 0), '数字超出范围。');
+        return (int) $digits;
     }
 
     public static function extendedPrice(int $quantity, int $unitPrice): int

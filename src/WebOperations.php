@@ -19,6 +19,10 @@ final class WebOperations extends Service
         'work.complete' => ['production'],
         'quality.decide' => ['quality'],
         'shipping.dispatch' => ['warehouse'],
+        'finance.purchase_bill' => ['finance'],
+        'finance.settle' => ['finance'],
+        'finance.adjust' => ['finance'],
+        'intercompany.transfer' => ['finance'],
     ];
 
     public function execute(string $action, array $input): array
@@ -33,6 +37,8 @@ final class WebOperations extends Service
             'create-purchase', 'issue-purchase', 'stop-purchase', 'receive-purchase',
             'create-rfq', 'record-quote', 'award-rfq', 'decide-inspection'
                 => (new ProcurementActions($this->db, $this->scope))->execute($action, $input),
+            'post-purchase-bill', 'settle-open-item', 'post-adjustment', 'close-period', 'transfer-between-organizations'
+                => (new FinanceActions($this->db, $this->scope))->execute($action, $input),
             default => throw new BusinessError('找不到此操作。', 404),
         };
     }

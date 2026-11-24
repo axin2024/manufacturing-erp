@@ -6,6 +6,8 @@ namespace ManufacturingErp;
 
 final class GeneralLedger extends Service
 {
+    public const CONTROLLED_ACCOUNTS = ['AR','AP','STOCK','VENDOR_STOCK','WIP','GRNI','VENDOR_ACCRUAL','DUE_FROM','DUE_TO'];
+
     public function adjustment(string $key, string $number, string $date, string $reason, array $rows, ?int $corrects = null): array
     {
         $number = Value::code($number, '调整凭证号');
@@ -79,7 +81,7 @@ final class GeneralLedger extends Service
             Value::assert(is_string($account) && is_string($currency) && is_int($amount), '调整分录格式无效。');
             $account = Value::code($account, '会计科目');
             Value::assert(isset(FinanceLedger::ACCOUNTS[$account])
-                && !in_array($account, ['AR','AP','STOCK','VENDOR_STOCK','WIP','GRNI','VENDOR_ACCRUAL','DUE_FROM','DUE_TO'], true),
+                && !in_array($account, self::CONTROLLED_ACCOUNTS, true),
                 '受子账控制的科目由对应业务单据调整。', 409);
             $lines[] = [$account, Identity::currency($currency), $amount];
         }
