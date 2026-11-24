@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS demo_cases (
+    org_id BIGINT UNSIGNED PRIMARY KEY,
+    version SMALLINT UNSIGNED NOT NULL,
+    result JSON NOT NULL,
+    installed_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    FOREIGN KEY (org_id) REFERENCES organizations(id)
+) ENGINE=InnoDB;

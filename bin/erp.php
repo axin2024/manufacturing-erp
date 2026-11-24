@@ -5,6 +5,7 @@ declare(strict_types=1);
 use ManufacturingErp\BusinessError;
 use ManufacturingErp\BatchWorker;
 use ManufacturingErp\Database;
+use ManufacturingErp\DemoScenario;
 use ManufacturingErp\Identity;
 use ManufacturingErp\Migrations;
 use ManufacturingErp\Value;
@@ -18,8 +19,9 @@ if ($command === 'help') {
     php bin/erp.php health
     php bin/erp.php init <集团名称> <法人编码> <法人名称> <本位币> <管理员名称> <邮箱>
     php bin/erp.php worker [--once|--drain]
+    php bin/erp.php demo [邮箱]
 
-    初始化密码通过 ERP_ADMIN_PASSWORD 环境变量传入。
+    初始化密码用 ERP_ADMIN_PASSWORD 传入，演示账号密码用 ERP_DEMO_PASSWORD 传入。
 
     HELP;
     exit(0);
@@ -58,6 +60,12 @@ try {
                     sleep(2);
                 }
             } while ($mode === '' || ($mode === '--drain' && $row !== null));
+            break;
+        case 'demo':
+            Value::assert(count($argv) <= 3, '演示命令只接受一个可选邮箱。');
+            Value::assert($migrations->ready(), '请先运行数据库迁移。', 503);
+            $result = (new DemoScenario($db))->install($argv[2] ?? DemoScenario::EMAIL, (string) getenv('ERP_DEMO_PASSWORD'));
+            echo Value::json($result) . "\n";
             break;
         default:
             throw new BusinessError('未知命令。请运行 php bin/erp.php help。');
