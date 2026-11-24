@@ -14,7 +14,10 @@ final class BatchWorker
     {
         while (($candidate = $this->db->row("SELECT r.id,r.org_id FROM batch_jobs j JOIN batch_rows r
             ON r.org_id=j.org_id AND r.job_id=j.id
-            WHERE j.state IN ('queued','running') AND r.state='pending' ORDER BY j.id,r.row_no LIMIT 1")) !== null) {
+            WHERE j.state IN ('queued','running','waiting_external') AND (r.state='pending'
+                OR (r.state='waiting_external' AND EXISTS (SELECT 1 FROM operation_receipts e
+                    WHERE e.org_id=r.org_id AND e.kind='purchase.receive' AND e.request_key=JSON_UNQUOTE(JSON_EXTRACT(r.payload,'$.event_key')))))
+            ORDER BY j.id,r.row_no LIMIT 1")) !== null) {
             $result = $this->db->transaction(fn(): ?array => $this->execute((int) $candidate['org_id'], (int) $candidate['id']));
             if ($result !== null) {
                 return $result;
@@ -27,21 +30,37 @@ final class BatchWorker
     {
         $this->db->row('SELECT id FROM organizations WHERE id=? FOR UPDATE', [$org]);
         $row = $this->db->row("SELECT r.*,j.kind FROM batch_rows r JOIN batch_jobs j ON j.org_id=r.org_id AND j.id=r.job_id
-            WHERE r.org_id=? AND r.id=? AND r.state='pending' AND j.state IN ('queued','running')", [$org, $id]);
+            WHERE r.org_id=? AND r.id=? AND r.state IN ('pending','waiting_external')
+                AND j.state IN ('queued','running','waiting_external')", [$org, $id]);
         if ($row === null) {
             return null;
         }
 
         $executor = (int) $row['executor_id'];
         $payload = Value::fromJson($row['payload']);
+        $notice = $row['kind'] === 'receipt_match' ? $this->receipt($org, $payload['event_key']) : null;
+        if ($row['state'] === 'waiting_external' && $notice === null) {
+            return null;
+        }
         $digest = hash('sha256', $row['payload']);
         $attempt = (int) $row['attempts'] + 1;
         $result = $message = null;
         try {
             $scope = (new Identity($this->db))->scope($executor, $org);
             Value::assert($scope->can(BatchJobs::ROLES[$row['kind']]), '执行人的角色已变更，请由有权限的人员重试。', 403);
-            $result = Value::json($this->apply($scope, $row['kind'], 'batch-row-' . $id, $payload));
-            $state = 'succeeded';
+            if ($row['kind'] === 'receipt_match') {
+                $state = 'waiting_external';
+                if ($notice !== null) {
+                    Value::assert($notice['source'] === $payload['source'] && $notice['external_number'] === $payload['external_number'],
+                        '已登记回执缺少对应的外部来源与编号。', 409);
+                    Value::assert((int) $notice['order_id'] === $payload['order_id'], '外部回执对应另一张采购单。', 409);
+                    $result = Value::json($notice);
+                    $state = 'succeeded';
+                }
+            } else {
+                $result = Value::json($this->apply($scope, $row['kind'], 'batch-row-' . $id, $payload));
+                $state = 'succeeded';
+            }
         } catch (BusinessError $error) {
             $message = $error->getMessage();
             $state = $error->status >= 500 ? 'retryable' : 'rejected';
@@ -52,8 +71,19 @@ final class BatchWorker
         $this->db->run('UPDATE batch_rows SET state=?,result=?,error_text=?,attempts=? WHERE org_id=? AND id=?',
             [$state, $result, $message, $attempt, $org, $id]);
         $job = (int) $row['job_id'];
-        $this->db->run('UPDATE batch_jobs SET state=? WHERE org_id=? AND id=?', [$this->jobState($org, $job), $org, $job]);
+        $this->db->run('UPDATE batch_jobs SET state=?,updated_at=CURRENT_TIMESTAMP(6) WHERE org_id=? AND id=?',
+            [$this->jobState($org, $job), $org, $job]);
         return ['job_id' => $job, 'row_no' => (int) $row['row_no'], 'attempt' => $attempt, 'state' => $state];
+    }
+
+    private function receipt(int $org, string $key): ?array
+    {
+        return $this->db->row("SELECT r.id AS receipt_id,r.order_id,r.number,r.actor_id AS received_by,e.payload_digest,
+            JSON_UNQUOTE(JSON_EXTRACT(e.result,'$.source')) AS source,
+            JSON_UNQUOTE(JSON_EXTRACT(e.result,'$.external_number')) AS external_number
+            FROM operation_receipts e LEFT JOIN receipts r ON r.org_id=e.org_id
+                AND r.id=CAST(JSON_UNQUOTE(JSON_EXTRACT(e.result,'$.receipt_id')) AS UNSIGNED)
+            WHERE e.org_id=? AND e.kind='purchase.receive' AND e.request_key=?", [$org, $key]);
     }
 
     private function apply(Scope $scope, string $kind, string $key, array $record): array
@@ -140,6 +170,9 @@ final class BatchWorker
             [$org, $job]), 'total', 'state');
         if (isset($counts['pending'])) {
             return 'running';
+        }
+        if (isset($counts['waiting_external'])) {
+            return 'waiting_external';
         }
         if (!isset($counts['succeeded'])) {
             return 'failed';

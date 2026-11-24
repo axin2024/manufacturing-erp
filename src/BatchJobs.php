@@ -8,19 +8,31 @@ use JsonException;
 
 final class BatchJobs extends Service
 {
-    public const ROLES = ['items' => 'planner', 'bom' => 'planner', 'opening' => 'warehouse', 'mrp' => 'planner'];
+    public const ROLES = ['items' => 'planner', 'bom' => 'planner', 'opening' => 'warehouse', 'mrp' => 'planner',
+        'receipt_match' => 'warehouse'];
+    public const STATES = ['queued','running','waiting_external','completed','partial','failed','cancelled'];
 
     public function enqueue(string $key, string $kind, int $version, array $rows): array
     {
         $role = self::ROLES[$kind] ?? null;
         Value::assert($role !== null && $version === 1, '导入类型或格式版本不受支持。');
-        Value::assert(array_is_list($rows) && count($rows) >= 1 && count($rows) <= ($kind === 'mrp' ? 1 : 1000),
+        Value::assert(array_is_list($rows) && count($rows) >= 1 && count($rows) <= (in_array($kind, ['mrp','receipt_match'], true) ? 1 : 1000),
             '批任务行数超出范围。');
         foreach ($rows as $record) {
             $this->checkPayload($record);
         }
+        if ($kind === 'receipt_match') {
+            $notice = $rows[0];
+            Value::assert(is_int($notice['order_id'] ?? null) && $notice['order_id'] > 0
+                && is_string($notice['source'] ?? null) && is_string($notice['external_number'] ?? null), '外部回执跟踪参数无效。');
+            $rows = [['order_id' => $notice['order_id']] + ReceiptNotice::identity($notice['source'], $notice['external_number'])];
+        }
         return $this->mutate(fn(int $org): array => $this->replay('jobs.enqueue', $key, [$kind, $version, $rows],
             function () use ($org, $kind, $version, $rows): array {
+                if ($kind === 'receipt_match') {
+                    $purchase = (new Purchasing($this->db, $this->scope))->order($rows[0]['order_id']);
+                    Value::assert(in_array($purchase['state'], ['issued','received'], true), '须使用已下达或已收货的采购单。', 409);
+                }
                 $id = $this->db->insert('INSERT INTO batch_jobs (org_id,kind,format_version,total_rows,created_by) VALUES (?,?,?,?,?)',
                     [$org, $kind, $version, count($rows), $this->scope->user]);
                 $insert = [];
@@ -29,9 +41,17 @@ final class BatchJobs extends Service
                 }
                 $this->db->insertRows('INSERT INTO batch_rows (org_id,job_id,row_no,payload,executor_id)', $insert);
                 $result = ['job_id' => $id, 'kind' => $kind, 'state' => 'queued', 'total_rows' => count($rows)];
+                if ($kind === 'receipt_match') {
+                    $result += $rows[0];
+                }
                 $this->audit('jobs.queued', $id, $result);
                 return $result;
             }), $role);
+    }
+
+    public function watchReceipt(string $key, int $order, string $source, string $number): array
+    {
+        return $this->enqueue($key, 'receipt_match', 1, [['order_id' => $order, 'source' => $source, 'external_number' => $number]]);
     }
 
     public function retry(int $id, array $corrections): array
@@ -50,6 +70,7 @@ final class BatchJobs extends Service
             Value::assert($retries !== [], '没有可以重试的任务行。', 409);
             $known = array_column($retries, null, 'row_no');
             Value::assert(array_diff_key($corrections, $known) === [], '只可修改失败行，成功或尚未执行的行保持原输入。', 409);
+            Value::assert($job['kind'] !== 'receipt_match' || $corrections === [], '外部回执标识不可改写，请另建跟踪任务。', 409);
             $rows = $corrections === [] ? $known : array_intersect_key($known, $corrections);
             foreach ($rows as $no => $line) {
                 Value::assert((int) $line['attempts'] < 100, '任务行已达尝试次数上限，请另建新任务。', 409);
@@ -71,7 +92,7 @@ final class BatchJobs extends Service
             if ($job['state'] === 'cancelled') {
                 return ['job_id' => $id, 'state' => 'cancelled'];
             }
-            $removed = $this->db->run("UPDATE batch_rows SET state='cancelled' WHERE org_id=? AND job_id=? AND state='pending'",
+            $removed = $this->db->run("UPDATE batch_rows SET state='cancelled' WHERE org_id=? AND job_id=? AND state IN ('pending','waiting_external')",
                 [$org, $id])->rowCount();
             Value::assert($removed > 0, '该任务没有可以取消的等待行。', 409);
             $this->db->run("UPDATE batch_jobs SET state='cancelled' WHERE org_id=? AND id=?", [$org, $id]);
@@ -80,8 +101,9 @@ final class BatchJobs extends Service
         }, $role);
     }
 
-    public function jobs(int $before = PHP_INT_MAX): array
+    public function jobs(int $before = PHP_INT_MAX, string $state = '', string $since = '', string $beforeAt = ''): array
     {
+        Value::assert($state === '' || in_array($state, self::STATES, true), '批任务状态无效。');
         $kinds = [];
         foreach (self::ROLES as $kind => $role) {
             if ($this->scope->can($role)) {
@@ -92,8 +114,28 @@ final class BatchJobs extends Service
             return [];
         }
         $list = implode(',', array_fill(0, count($kinds), '?'));
+        $where = ["j.org_id=?", "j.kind IN ($list)"];
+        $parameters = [$this->scope->org, ...$kinds];
+        if ($state !== '') {
+            $where[] = 'j.state=?';
+            $parameters[] = $state;
+        }
+        if ($since !== '') {
+            $where[] = 'j.updated_at>=?';
+            $parameters[] = Value::day($since) . ' 00:00:00';
+        }
+        if ($beforeAt !== '') {
+            Value::assert((bool) preg_match('/\A[0-9-]{10} [0-9:]{8}\.[0-9]{6}\z/', $beforeAt), '任务游标时间无效。');
+            Value::timestamp(substr($beforeAt, 0, 19));
+            $where[] = '(j.updated_at<? OR (j.updated_at=? AND j.id<?))';
+            array_push($parameters, $beforeAt, $beforeAt, $before);
+        } else {
+            $where[] = 'j.id<?';
+            $parameters[] = $before;
+        }
+        $filters = implode(' AND ', $where);
         return $this->db->rows("SELECT j.*,u.name AS creator FROM batch_jobs j JOIN users u ON u.id=j.created_by
-            WHERE j.org_id=? AND j.id<? AND j.kind IN ($list) ORDER BY j.id DESC LIMIT 51", [$this->scope->org, $before, ...$kinds]);
+            WHERE $filters ORDER BY j.updated_at DESC,j.id DESC LIMIT 51", $parameters);
     }
 
     public function details(int $id, int $after = 0): array

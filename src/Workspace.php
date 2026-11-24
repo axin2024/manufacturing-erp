@@ -38,7 +38,7 @@ final class Workspace extends WorkspaceScreen
             'planning' => $this->planning($id, $before, WebInput::stringParameter($parameters, 'ref'),
                 WebInput::stringParameter($parameters, 'after'), WebInput::stringParameter($parameters, 'diff_after')),
             'jobs' => $this->jobs($id, $before, isset($parameters['row']) ? WebInput::integer($parameters['row'], '任务行号') : null,
-                isset($parameters['after']) ? WebInput::integer($parameters['after'], '分页游标') : 0),
+                isset($parameters['after']) ? WebInput::integer($parameters['after'], '分页游标') : 0, $parameters),
             'purchases', 'sourcing', 'inbound', 'inventory', 'trace', 'work', 'vendors', 'quality', 'shipments'
                 => (new OperationsWorkspace($this->db, $this->scope))->screen($page, $id, $before, $parameters),
             'finance', 'receivables', 'payables', 'bill', 'journals', 'trial', 'intercompany'
@@ -154,13 +154,28 @@ final class Workspace extends WorkspaceScreen
         ], 'tables' => $tables];
     }
 
-    private function jobs(?int $id, int $before, ?int $row, int $after): array
+    private function jobs(?int $id, int $before, ?int $row, int $after, array $parameters): array
     {
         $this->requireRole('planner', 'warehouse');
         $jobs = new BatchJobs($this->db, $this->scope);
         if ($id === null) {
-            $list = $this->paged($jobs->jobs($before), 'id', 'jobs');
-            $kinds = array_filter(BatchJobs::ROLES, fn(string $role, string $kind): bool => $kind !== 'mrp' && $this->scope->can($role), ARRAY_FILTER_USE_BOTH);
+            $state = WebInput::stringParameter($parameters, 'state');
+            $since = WebInput::stringParameter($parameters, 'changed_since');
+            $beforeAt = WebInput::stringParameter($parameters, 'before_at');
+            $rows = $jobs->jobs($before, $state, $since, $beforeAt);
+            $next = null;
+            if (count($rows) > 50) {
+                array_pop($rows);
+                $next = WebView::url('jobs', null, ['before' => $rows[49]['id'], 'before_at' => $rows[49]['updated_at'],
+                    'state' => $state, 'changed_since' => $since]);
+            }
+            $states = array_combine(BatchJobs::STATES, array_map(WebView::state(...), BatchJobs::STATES));
+            $filters = [
+                $this->field('state', '任务状态', 'select', ['options' => $states, 'value' => $state, 'required' => false]),
+                $this->field('changed_since', '更新日期从（UTC）', 'date', ['value' => $since, 'required' => false]),
+            ];
+            $kinds = array_filter(BatchJobs::ROLES,
+                fn(string $role, string $kind): bool => in_array($kind, ['items','bom','opening'], true) && $this->scope->can($role), ARRAY_FILTER_USE_BOTH);
             $options = [];
             foreach (array_keys($kinds) as $kind) {
                 $options[$kind] = WebView::state($kind);
@@ -169,19 +184,29 @@ final class Workspace extends WorkspaceScreen
                 ['name' => 'kind', 'label' => '导入类型', 'type' => 'select', 'options' => $options],
                 ['name' => 'rows', 'label' => 'JSON 数据（最多 1,000 行）', 'type' => 'textarea', 'placeholder' => '[{"code":"PIN","name":"标准销","uom":"件","sourcing":"purchase","standard_cost_minor":1200,"lead_days":2}]'],
             ], ['request_key' => bin2hex(random_bytes(16)), 'format_version' => 1], '每行单独记录结果。格式版本 1。');
-            return ['title' => '批量任务', 'forms' => [$form], 'tables' => [
+            return ['title' => '批量任务', 'forms' => [$form], 'filters' => $filters, 'tables' => [
                 $this->table('任务列表', ['id' => '任务号', 'kind' => '类型', 'state' => '状态', 'total_rows' => '行数',
-                    'creator' => '提交人', 'updated_at' => '更新时间'], $list['rows'], 'jobs', 'id', $list['next']),
+                    'creator' => '提交人', 'updated_at' => '更新时间'], $rows, 'jobs', 'id', $next),
             ]];
         }
         $job = $jobs->details($id, $after);
         $list = $this->paged($job['rows'], 'row_no', 'jobs', $id, 'after');
+        $links = [];
         foreach ($list['rows'] as &$line) {
             $line['_links']['row_no'] = WebView::url('jobs', $id, ['row' => $line['row_no'], 'after' => $after]);
             if ($job['kind'] === 'mrp' && $line['state'] === 'succeeded') {
                 $run = Value::fromJson($line['result'])['run_id'];
                 $line['_links']['result'] = WebView::url('planning', $run);
                 $line['result'] = '计划运行 #' . $run;
+            }
+            if ($job['kind'] === 'receipt_match') {
+                $order = (int) Value::fromJson($line['payload'])['order_id'];
+                $links[] = $this->link('关联采购单', 'purchases', $order);
+                if ($line['state'] === 'succeeded') {
+                    $receipt = Value::fromJson($line['result']);
+                    $line['_links']['result'] = WebView::url('inbound', (int) $receipt['receipt_id']);
+                    $line['result'] = $receipt['number'];
+                }
             }
         }
         unset($line);
@@ -194,7 +219,8 @@ final class Workspace extends WorkspaceScreen
             array_unshift($tables, $this->table('第 ' . $row . ' 行的执行记录', ['ordinal' => '次数', 'actor' => '执行人', 'state' => '状态',
                 'payload_digest' => '输入摘要', 'result' => '结果', 'error_text' => '失败原因', 'created_at' => '时间'], $jobs->attempts($id, $row)));
             $chosen = array_column($job['rows'], null, 'row_no')[$row] ?? null;
-            if ($chosen !== null && $job['state'] !== 'cancelled' && in_array($chosen['state'], ['rejected','retryable'], true)) {
+            if ($job['kind'] !== 'receipt_match' && $chosen !== null && $job['state'] !== 'cancelled'
+                && in_array($chosen['state'], ['rejected','retryable'], true)) {
                 $forms[] = $this->form('修正并重试第 ' . $row . ' 行', 'retry-job', [
                     ['name' => 'payload', 'label' => '修正后的输入', 'type' => 'textarea', 'value' => $chosen['payload']],
                 ], ['id' => $id, 'row' => $row]);
@@ -203,15 +229,16 @@ final class Workspace extends WorkspaceScreen
         if ($job['state'] !== 'cancelled' && (isset($job['counts']['rejected']) || isset($job['counts']['retryable']))) {
             $forms[] = $this->form('按原输入重试失败行', 'retry-job', [], ['id' => $id], '如需修正某行，先进入该行的执行记录。');
         }
-        if (isset($job['counts']['pending'])) {
-            $forms[] = $this->form('取消未开始的行', 'cancel-job', [], ['id' => $id], '已成功的业务记录继续有效。');
+        if (isset($job['counts']['pending']) || isset($job['counts']['waiting_external'])) {
+            $forms[] = $this->form('取消等待中的行', 'cancel-job', [], ['id' => $id], '已成功的业务记录继续有效。');
         }
         $details = ['类型' => WebView::state($job['kind']), '状态' => WebView::state($job['state']), '总行数' => $job['total_rows'],
             '格式版本' => $job['format_version'], '提交人' => $job['creator']];
         foreach ($job['counts'] as $state => $count) {
             $details[WebView::state($state) . '行数'] = $count;
         }
-        return ['title' => '批量任务 #' . $id, 'parent' => ['jobs', '批量任务'], 'details' => $details, 'forms' => $forms, 'tables' => $tables];
+        return ['title' => '批量任务 #' . $id, 'parent' => ['jobs', '批量任务'], 'details' => $details, 'forms' => $forms,
+            'links' => $links, 'tables' => $tables];
     }
 
 }

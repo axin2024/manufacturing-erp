@@ -13,6 +13,7 @@ final class WebView
         'queued' => '待调度', 'running' => '执行中', 'failed' => '失败', 'retryable' => '可重试', 'rejected' => '拒绝',
         'partial' => '部分完成', 'succeeded' => '成功', 'pending' => '待处理', 'open' => '开放', 'resolved' => '已处置',
         'items' => '物料导入', 'bom' => '物料清单导入', 'opening' => '期初库存导入', 'mrp' => '物料计划试算',
+        'receipt_match' => '外部收货回执跟踪', 'waiting_external' => '等待外部结果',
         'purchase' => '采购', 'manufacture' => '自制', 'subcontract' => '委外', 'work' => '工单', 'shipping' => '发货',
         'receipt' => '收货', 'issued' => '已下单', 'received' => '已收货', 'waiting_quality' => '完工待检',
         'available' => '可用', 'rework' => '返工', 'stock' => '现有库存', 'ar' => '应收', 'ap' => '应付',

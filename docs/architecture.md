@@ -50,6 +50,9 @@ HTTP 运行在同一个站点根路径。设置 `Accept: application/json` 或 `
 | `GET /?page=planning&id=…` | 试算明细、短缺和重算差异。用 `ref` 查询单行来源 |
 | `POST /?action=calculate-plan` | 输入 `request_key`、`as_of`、`horizon_on` 和可选的 `policy`，返回 HTTP 202 与任务号 |
 | `GET /?page=jobs&id=…` | 查看任务行、失败原因及重试历史 |
+| `GET /?page=jobs&state=waiting_external` | 查询当前法人和岗位的待回执任务。可传 `changed_since` UTC 日期，翻页使用响应中的更新时间与任务号组合游标 |
+| `POST /?action=watch-receipt` | 仓储提交采购单 `id`、`source`、`external_number` 及提交标识 `request_key`，返回任务号与事件标识 `event_key` |
+| `POST /?action=receive-purchase` | 登记现有采购单的收货批次。带 `source` 与 `external_number` 时，以该来源与外部编号确定幂等标识，成功返回 `request_key` |
 | `POST /?action=issue-material` | 输入 `request_key`、`material`、`lot`、`location`、`quantity` 和 `posted_on`，可指定 `replacement`、`overage` 授权 |
 | `GET /?page=receipt&operation=…&request_key=…` | 原经办人查询当前法人中的持久回执，如 `work.issue` 或 `jobs.enqueue` |
 | `GET /?page=export&kind=…` | 下载 CSV。支持 `work-issues`、`lot-trace`、`work-variance`、`receivables`、`payables`、`journals` |
@@ -64,5 +67,7 @@ curl --fail --cookie cookies.txt -H 'Accept: application/json' \
 ```
 
 对已完成并持久化的操作，原经办人使用相同请求标识和内容重试会得到原结果。同一法人、同一操作的请求标识只能归属于一次提交。检验判定还携带记录版本，版本冲突时重新读单据。常见错误为 401 会话失效、403 权限或令牌校验失败、404 对象在当前范围内不可见、409 状态冲突、422 字段或业务校验失败。扩展版本缺失或健康检查未通过时返回 503。典型录入、发货与关账请求可参考 [HTTP 回归用例](../tests/http-workspace.php)。
+
+外部收货跟踪把来源和单号统一为大写编码，例如 `SUPPLIER-PORTAL` 与 `CONFIRM-42`。仓储经办人通过收货页面或已认证接口录入实收批次和同一组编码。任务在没有持久回执时显示「等待外部结果」，收到原事件后只做匹配。采购单匹配时保留外部来源、外部编号、报文摘要、收货经办人与单据跳转。错单会显示失败原因，已取消的跟踪不会继续执行。
 
 业务过账和回执在同一事务提交。批量任务的执行、重试和取消按行保存，已完成的行继续生效。CSV 使用 UTF-8 BOM，并处理可能被表格软件误识别为公式的文本。

@@ -83,6 +83,8 @@ final class OperationsWorkspace extends WorkspaceScreen
             $forms[] = $this->requestForm('登记收货批次', 'receive-purchase', [
                 $this->field('number', '收货单号', 'text', ['maxlength' => 40]),
                 $this->dateField('received_on', '收货日期'),
+                $this->field('source', '外部来源（选填）', 'text', ['maxlength' => 40, 'required' => false]),
+                $this->field('external_number', '外部回执号（选填）', 'text', ['maxlength' => 40, 'required' => false]),
                 $this->field('lines', '收货批次', 'rows', ['fields' => [
                     $this->field('line_id', '采购行', 'select', ['options' => $options]),
                     $this->field('lot', '批号', 'text', ['maxlength' => 40]),
@@ -90,6 +92,12 @@ final class OperationsWorkspace extends WorkspaceScreen
                     $this->quantityField('quantity', '实收数量（基础单位）'),
                 ]]),
             ], $hidden, '同一采购行可以拆成多个批次，每个批次独立生成检验单。');
+        }
+        if ($this->scope->can('warehouse') && in_array($order['state'], ['issued','received'], true)) {
+            $forms[] = $this->requestForm('跟踪外部收货回执', 'watch-receipt', [
+                $this->field('source', '外部来源', 'text', ['maxlength' => 40]),
+                $this->field('external_number', '外部回执号', 'text', ['maxlength' => 40]),
+            ], $hidden, '收货登记使用同一来源与回执号后，任务会关联原收货单。');
         }
         return $forms;
     }

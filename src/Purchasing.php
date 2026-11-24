@@ -68,13 +68,20 @@ final class Purchasing extends Service
         }, 'buyer');
     }
 
-    public function receive(string $key, int $order, string $number, string $receivedOn, array $entries): array
+    public function receive(string $key, int $order, string $number, string $receivedOn, array $entries, ?array $notice = null): array
     {
         $number = Value::code($number, '收货单号');
         Value::day($receivedOn);
         $entries = $this->normalizeReceiptEntries($entries);
-        return $this->mutate(fn(int $org): array => $this->replay('purchase.receive', $key, [$order, $number, $receivedOn, $entries],
-            function () use ($org, $order, $number, $receivedOn, $entries): array {
+        $external = [];
+        $payload = [$order, $number, $receivedOn, $entries];
+        if ($notice !== null) {
+            $key = $notice['event_key'];
+            $external = ['source' => $notice['source'], 'external_number' => $notice['external_number']];
+            $payload[] = $external;
+        }
+        return $this->mutate(fn(int $org): array => $this->replay('purchase.receive', $key, $payload,
+            function () use ($org, $order, $number, $receivedOn, $entries, $external): array {
                 $record = $this->orderRecord($order);
                 Value::assert($record['state'] === 'issued', '只有待收货的已下单采购单可接收新批次。', 409);
                 Value::assert($receivedOn >= $record['ordered_on'], '收货日期不能早于采购日期。');
@@ -91,8 +98,8 @@ final class Purchasing extends Service
                 if ($outstanding === null) {
                     $this->db->run("UPDATE purchase_orders SET state='received' WHERE org_id=? AND id=?", [$org, $order]);
                 }
-                $this->audit('purchase.received', $receipt, ['order_id' => $order, 'received_on' => $receivedOn, 'lines' => $received]);
-                return ['receipt_id' => $receipt, 'lines' => $received, 'order_state' => $outstanding === null ? 'received' : 'issued'];
+                $this->audit('purchase.received', $receipt, ['order_id' => $order, 'received_on' => $receivedOn, 'lines' => $received] + $external);
+                return ['receipt_id' => $receipt, 'lines' => $received, 'order_state' => $outstanding === null ? 'received' : 'issued'] + $external;
             }), 'warehouse');
     }
 

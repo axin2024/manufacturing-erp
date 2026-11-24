@@ -269,7 +269,25 @@ same('issued', $client->post('issue-purchase', ['id' => $orderId], $csrf)['body'
 $purchaseScreen = $client->get('/?page=purchases&id=' . $orderId, false);
 same(true, str_contains($purchaseScreen['body'], 'name="lines[0][line_id]"'), 'Purchase receipt form renders repeatable batch controls');
 same(true, str_contains($purchaseScreen['body'], 'QA-RAW · 待收 3.5 ea'), 'Receipt can pick the item by name and remaining amount');
-$receiptData = ['id' => $orderId, 'number' => 'RC-HTTP', 'received_on' => $day, 'request_key' => 'http-rc-' . $tag, 'lines' => [
+$notice = ['id' => $orderId, 'source' => 'SUPPLIER-PORTAL', 'external_number' => 'CONFIRM-42'];
+$watch = $client->post('watch-receipt', $notice + ['request_key' => 'watch-receipt'], $csrf);
+same(202, $watch['status'], 'Warehouse can register a supplier receipt tracking job');
+$watchId = $watch['body']['job_id'];
+$worker = new BatchWorker($db);
+same('waiting_external', $worker->next()['state'], 'The tracked event is not complete before the supplier receipt exists');
+same(null, $worker->next(), 'An unresolved external dependency is not reprocessed in a tight loop');
+$waiting = $client->get('/?page=jobs&id=' . $watchId)['body'];
+same('等待外部结果', $waiting['details']['状态'], 'The workbench reports that the job is waiting outside ERP');
+same('/?page=purchases&id=' . $orderId, $waiting['links'][0]['url'], 'A waiting job links to its source purchase order');
+same([$watchId], array_column($client->get('/?page=jobs&state=waiting_external')['body']['tables'][0]['rows'], 'id'),
+    'The job list shows only waiting external matches in this ledger');
+same([], $client->get('/?page=jobs&state=waiting_external&changed_since=2060-01-01')['body']['tables'][0]['rows'],
+    'The job list respects the lower bound on update date');
+$cancelWatch = $client->post('watch-receipt', [...$notice, 'external_number' => 'CONFIRM-CANCEL', 'request_key' => 'watch-cancel'], $csrf);
+$cancelWatchId = $cancelWatch['body']['job_id'];
+same('waiting_external', $worker->next()['state'], 'A second empty track request can wait independently');
+same('cancelled', $client->post('cancel-job', ['id' => $cancelWatchId], $csrf)['body']['state'], 'Waiting external jobs can be cancelled');
+$receiptData = $notice + ['number' => 'RC-HTTP', 'received_on' => $day, 'request_key' => $watch['body']['event_key'], 'lines' => [
     0 => ['line_id' => $line, 'lot' => 'HTTP-LOT-A', 'location' => $raw, 'quantity' => '1.125'],
     2 => ['line_id' => $line, 'lot' => 'HTTP-LOT-B', 'location' => $raw, 'quantity' => '2.375'],
 ]];
@@ -279,6 +297,8 @@ $client->submitAndDropResponse('receive-purchase', $receiptData, $csrf,
 $recovered = $client->get('/?page=receipt&operation=purchase.receive&request_key=' . $receiptData['request_key']);
 same(200, $recovered['status'], 'The receipt is discoverable after the client disconnects without reading the response');
 $receiptId = $recovered['body']['result']['receipt_id'];
+same(['SUPPLIER-PORTAL', 'CONFIRM-42'], [$recovered['body']['result']['source'], $recovered['body']['result']['external_number']],
+    'The durable event identifies the originating system and external document number');
 $form = $client->submit('receive-purchase', $receiptData, $csrf);
 same(303, $form['status'], 'Retrying the browser form preserves the original receipt and supports a deleted middle row');
 $receiptReplay = [...$receiptData, 'lines' => array_values($receiptData['lines'])];
@@ -288,6 +308,17 @@ same($receiptId, $postedReceipt['body']['receipt_id'], 'JSON retry returns the d
 same('/?page=inbound&id=' . $receiptId, $form['headers']['location'], 'Browser lands on the original receipt');
 same(1, (int) $db->row('SELECT COUNT(*) AS total FROM receipts WHERE org_id=? AND order_id=?', [$scope->org, $orderId])['total'],
     'There is only one posted receipt after both retries');
+same($watchId, $worker->next()['job_id'], 'The original tracking job resumes when its exact event is durable');
+$confirmed = $client->get('/?page=jobs&id=' . $watchId)['body'];
+same('已完成', $confirmed['details']['状态'], 'The original job marks the external notice as matched');
+same('/?page=inbound&id=' . $receiptId, $confirmed['tables'][0]['rows'][0]['_links']['result'], 'Matched notice links to the already posted receipt');
+$result = Value::fromJson($db->row('SELECT result FROM batch_rows WHERE org_id=? AND job_id=?', [$scope->org, $watchId])['result']);
+same($adminId, (int) $result['received_by'], 'The matched result preserves the person who posted the receipt');
+same(64, strlen($result['payload_digest']), 'The matched result preserves the submitted payload digest');
+same(null, $worker->next(), 'The receipt job finishes once and a cancelled job stays cancelled');
+$wrongWatchId = $client->post('watch-receipt', [...$notice, 'id' => $stock['planned_order_id'], 'request_key' => 'notice-wrong-order'], $csrf)['body']['job_id'];
+same('rejected', $worker->next()['state'], 'A notice cannot silently settle a different purchase order');
+same('失败', $client->get('/?page=jobs&id=' . $wrongWatchId)['body']['details']['状态'], 'Mismatched notice is visible as a failed job');
 $receivedLines = $client->get('/?page=inbound&id=' . $receiptId)['body']['tables'][0]['rows'];
 same([1125, 2375], array_column($receivedLines, 'pending_milli'), 'Each confirmed batch has its own pending inspection');
 $inspectId = $receivedLines[0]['inspection_id'];
@@ -468,6 +499,15 @@ same($jobId, $client->get($receipt)['body']['result']['job_id'], 'Durable receip
 same($jobId, (new BatchWorker($db))->next()['job_id'], 'Worker takes the job published through HTTP');
 $response = $client->get('/?page=jobs&id=' . $jobId, false);
 same(true, str_contains($response['body'], '计划运行 #'), 'Task view links its successful result to the plan');
+$db->insertRows('INSERT INTO batch_jobs (org_id,kind,format_version,total_rows,created_by,state,updated_at)',
+    array_fill(0, 52, [$scope->org, 'items', 1, 1, $adminId, 'completed', '2060-01-01 00:00:00.123456']));
+$pageOne = $client->get('/?page=jobs&state=completed&changed_since=2060-01-01')['body']['tables'][0];
+same(50, count($pageOne['rows']), 'The job screen limits a page of identically-timed updates');
+$pageTwo = $client->get($pageOne['next'])['body']['tables'][0];
+same(2, count($pageTwo['rows']), 'The composite cursor reaches the rest of the same update timestamp');
+same([], array_values(array_intersect(array_column($pageOne['rows'], 'id'), array_column($pageTwo['rows'], 'id'))),
+    'The stable job ID tie-breaker prevents repeat rows when update timestamps match');
+same(null, $pageTwo['next'], 'Filtered job pagination ends after the last match');
 
 $change = $client->post('switch-org', ['org_id' => $fixture['trade_org_id']], $csrf);
 same($fixture['trade_org_id'], $change['body']['organization_id'], 'User can select their other approved organization');
@@ -497,6 +537,7 @@ $other = new WebTestClient($base);
 $otherToken = $other->get('/?page=session')['body']['csrf'];
 $other->post('login', ['email' => $foreignEmail, 'password' => $password], $otherToken);
 same(404, $other->get('/?page=jobs&id=' . $jobId)['status'], 'Unrelated organization cannot query a task by its ID');
+same(404, $other->get('/?page=jobs&id=' . $watchId)['status'], 'Unrelated organizations cannot read a matched supplier event');
 same(404, $other->get($receipt)['status'], 'An unrelated organization cannot query a receipt');
 same(404, $other->get('/?page=export&kind=lot-trace&id=' . $stock['substitute_lot_id'], false)['status'], 'Cross-tenant CSV request is refused');
 same(404, $other->get('/?page=vendors&id=' . $contract)['status'], 'Cross-tenant vendor order lookup is refused');

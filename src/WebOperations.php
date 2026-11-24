@@ -45,6 +45,7 @@ final class WebOperations extends Service
             'calculate-plan' => $this->calculatePlan($input),
             'approve-plan' => $this->approvePlan($input),
             'enqueue-job' => $this->enqueueJob($input),
+            'watch-receipt' => $this->watchReceipt($input),
             'retry-job' => $this->retryJob($input),
             'cancel-job' => $this->cancelJob($input),
             'create-purchase', 'issue-purchase', 'stop-purchase', 'receive-purchase',
@@ -116,6 +117,16 @@ final class WebOperations extends Service
         return $this->queue($input, $kind, WebInput::json($input['rows'] ?? null, '导入数据'));
     }
 
+    private function watchReceipt(array $input): array
+    {
+        $key = WebInput::stringParameter($input, 'request_key');
+        $source = WebInput::stringParameter($input, 'source');
+        $number = WebInput::stringParameter($input, 'external_number');
+        $job = (new BatchJobs($this->db, $this->scope))->watchReceipt($key, WebInput::id($input, 'id'), $source, $number);
+        return ['target' => WebView::url('jobs', $job['job_id']), 'message' => '外部收货回执已加入跟踪。', 'status' => 202,
+            'result' => $job];
+    }
+
     private function queue(array $input, string $kind, array $rows): array
     {
         $key = WebInput::stringParameter($input, 'request_key');
@@ -138,6 +149,6 @@ final class WebOperations extends Service
     {
         $id = WebInput::integer($input['id'] ?? null, '任务号');
         $result = (new BatchJobs($this->db, $this->scope))->cancel($id);
-        return ['target' => WebView::url('jobs', $id), 'message' => '未开始的行已取消。', 'result' => $result];
+        return ['target' => WebView::url('jobs', $id), 'message' => '等待中的行已取消。', 'result' => $result];
     }
 }

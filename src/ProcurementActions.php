@@ -47,14 +47,17 @@ final class ProcurementActions extends Service
 
     private function receive(string $key, array $input): array
     {
+        $source = WebInput::stringParameter($input, 'source');
+        $externalNumber = WebInput::stringParameter($input, 'external_number');
+        $notice = $source === '' && $externalNumber === '' ? null : ReceiptNotice::identity($source, $externalNumber);
         $rows = WebInput::lines($input, 'lines', static fn(array $row): array => [
             'line_id' => WebInput::id($row, 'line_id'), 'lot' => WebInput::stringParameter($row, 'lot'),
             'location' => WebInput::id($row, 'location'), 'quantity' => WebInput::quantity($row, 'quantity'),
         ]);
         $result = (new Purchasing($this->db, $this->scope))->receive($key, WebInput::id($input, 'id'),
-            WebInput::stringParameter($input, 'number'), WebInput::stringParameter($input, 'received_on'), $rows);
+            WebInput::stringParameter($input, 'number'), WebInput::stringParameter($input, 'received_on'), $rows, $notice);
         return ['target' => WebView::url('inbound', $result['receipt_id']), 'message' => '收货已过账，批次等待检验。',
-            'result' => $result, 'status' => 201];
+            'result' => $result + ['request_key' => $notice['event_key'] ?? $key], 'status' => 201];
     }
 
     private function source(string $action, string $key, array $input): array

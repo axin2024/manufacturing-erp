@@ -24,10 +24,8 @@ use ManufacturingErp\WebView;
             <input type="hidden" name="<?= WebView::e($key) ?>" value="<?= WebView::e($value) ?>">
         <?php endforeach; ?>
         <?php foreach ($screen['filters'] as $field): ?>
-            <label><?= WebView::e($field['label']) ?>
-                <input name="<?= WebView::e($field['name']) ?>" type="<?= WebView::e($field['type']) ?>"
-                    value="<?= WebView::e($field['value']) ?>" required>
-            </label>
+            <?php $fieldName = $field['name']; ?>
+            <?php require __DIR__ . '/field.php'; ?>
         <?php endforeach; ?>
         <button class="button" type="submit">查询</button>
     </form>
