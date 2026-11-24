@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use ManufacturingErp\Database;
+use ManufacturingErp\Exports;
 use ManufacturingErp\FiscalClose;
 use ManufacturingErp\GeneralLedger;
 use ManufacturingErp\Identity;
@@ -52,7 +53,7 @@ $item = $master->addItem('HOUSING', 'Machine housing', 'ea', 'purchase', 1024, 0
 same($item, $tradeMaster->addItem('HOUSING', 'Machine housing', 'ea', 'purchase', 1200, 0), 'Company inventory uses shared product, independent accounts');
 $supplier = $master->addParty('SUPPLIER', 'Machining Supplier', 'supplier');
 $wrongSupplier = $master->addParty('WRONG', 'Wrong Supplier', 'supplier');
-$customer = $master->addParty('CUSTOMER', 'Machine Depot', 'customer');
+$customer = $master->addParty('CUSTOMER', '+Machine Depot', 'customer');
 $po = $purchase->create('po', 'PO-FIN', $supplier, $day, [
     ['item' => $item, 'uom' => 'ea', 'quantity' => 3000, 'unit_price_minor' => 1024, 'due_on' => $next],
 ]);
@@ -155,5 +156,16 @@ $correction = $ledger->adjustment('adjust-next', 'ADJ-AUGUST', '2034-08-01', 'Re
 same($adjust['journal_id'], (int) $ledger->journal($correction['journal_id'])['corrects_journal_id'], 'Open-period adjustment links to original voucher');
 same($closed['digest'], $close->review($day)['digest'], 'Adjustment does not mutate the closed period snapshot');
 same(0, $subledger->settle('august-pay', $ap, 'OUTGOING-003', 2000, '2034-08-01')['open_minor'], 'Remaining payable can clear in the open period');
+
+$exports = new Exports($db, $scope);
+same("'+Machine Depot", csvRecords($exports, 'receivables')[0]['party'], 'CSV exports neutralize spreadsheet formulas in names');
+same('0', csvRecords($exports, 'payables')[0]['open_minor'], 'Payable CSV includes the cleared balance');
+$august = csvRecords($exports, 'journals', null, '2034-08-01');
+same(['2034-08-01'], array_values(array_unique(array_column($august, 'period_start'))), 'Journal CSV is limited to the requested period');
+same(2025, array_sum(array_column($august, 'debit_minor')), 'Journal CSV reports all matching debit lines');
+same(2025, array_sum(array_column($august, 'credit_minor')), 'Journal CSV reports all matching credit lines');
+$outsideExports = new Exports($db, $outside);
+same([], csvRecords($outsideExports, 'journals'), 'Outside tenant exports zero journal lines');
+same([], csvRecords($outsideExports, 'receivables'), 'Outside tenant exports zero receivables');
 
 finish('Journal, receivables, payables, intercompany and fiscal close');

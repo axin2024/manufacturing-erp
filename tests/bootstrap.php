@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use ManufacturingErp\BusinessError;
+use ManufacturingErp\Exports;
 
 require dirname(__DIR__) . '/src/bootstrap.php';
 
@@ -40,4 +41,20 @@ function finish(string $suite): void
 {
     global $checks;
     echo $suite . ': ' . $checks . " assertions passed.\n";
+}
+
+function csvRecords(Exports $exports, string $kind, ?int $id = null, ?string $filter = null): array
+{
+    $handle = $exports->open($kind, $id, $filter)['stream'];
+    try {
+        same("\xEF\xBB\xBF", fread($handle, 3), 'CSV has the UTF-8 BOM');
+        $columns = fgetcsv($handle, 0, ',', '"', '');
+        $rows = [];
+        while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
+            $rows[] = array_combine($columns, $row);
+        }
+        return $rows;
+    } finally {
+        fclose($handle);
+    }
 }

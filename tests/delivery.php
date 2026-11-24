@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use ManufacturingErp\Completion;
 use ManufacturingErp\Database;
+use ManufacturingErp\Exports;
 use ManufacturingErp\FiscalClose;
 use ManufacturingErp\GeneralLedger;
 use ManufacturingErp\Genealogy;
@@ -171,5 +172,19 @@ $intruder = $identity->initialize('Unrelated Group ' . $instance, 'OTHER', 'Othe
 $foreign = $identity->scope($intruder['user'], $intruder['org']);
 rejects(404, fn() => (new Genealogy($db, $foreign))->trace($finishedLot, 'upstream'), 'Tenant isolation applies to genealogy');
 rejects(404, fn() => (new Shipping($db, $foreign))->shipment($shipment['shipment_id']), 'Tenant isolation applies to shipment readbacks');
+
+$exports = new Exports($db, $scope);
+$outsideExports = new Exports($db, $foreign);
+$issuesCsv = csvRecords($exports, 'work-issues', $order);
+same('REPLACEMENT-INPUT', array_column($issuesCsv, 'lot_code', 'id')[$b['issue_id']], 'Issue export identifies the alternative batch');
+$traceCsv = csvRecords($exports, 'lot-trace', $lot2, 'downstream');
+$shippedCsv = array_filter($traceCsv, static fn(array $row): bool => $row['type'] === 'shipment');
+same(['SHP-98', 'SHP-2'], array_column($shippedCsv, 'shipment_number'), 'Trace export contains both shipments');
+$costCsv = csvRecords($exports, 'work-variance', $order);
+$byCost = array_column($costCsv, 'actual_minor', 'source_kind');
+same('-1200', $byCost['return'], 'CSV keeps return cost as a signed number');
+rejects(404, fn() => $outsideExports->open('work-issues', $order), 'An outside tenant cannot export work issues');
+rejects(404, fn() => $outsideExports->open('work-variance', $order), 'An outside tenant cannot export work costs');
+rejects(404, fn() => $outsideExports->open('lot-trace', $lot2), 'An outside tenant cannot export genealogy');
 
 finish('Production, operation costs, rework, shipping and lot recall');

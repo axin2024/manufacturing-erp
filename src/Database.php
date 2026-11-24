@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ManufacturingErp;
 
+use Generator;
 use LogicException;
 use PDO;
 use PDOStatement;
@@ -11,6 +12,8 @@ use Throwable;
 
 final class Database
 {
+    private int $savepoint = 0;
+
     private function __construct(private readonly PDO $connection)
     {
     }
@@ -50,6 +53,21 @@ final class Database
         return $this->run($sql, $parameters)->fetchAll();
     }
 
+    public function stream(string $sql, array $parameters = []): Generator
+    {
+        $this->connection->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+        $statement = null;
+        try {
+            $statement = $this->run($sql, $parameters);
+            while (($row = $statement->fetch()) !== false) {
+                yield $row;
+            }
+        } finally {
+            $statement?->closeCursor();
+            $this->connection->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
+        }
+    }
+
     public function insert(string $sql, array $parameters): int
     {
         $this->run($sql, $parameters);
@@ -74,7 +92,19 @@ final class Database
     public function transaction(callable $work): mixed
     {
         if ($this->connection->inTransaction()) {
-            throw new LogicException('Transaction already open.');
+            $name = 'erp_' . ++$this->savepoint;
+            $this->connection->exec('SAVEPOINT ' . $name);
+            try {
+                $result = $work();
+                $this->connection->exec('RELEASE SAVEPOINT ' . $name);
+                return $result;
+            } catch (Throwable $error) {
+                if ($this->connection->inTransaction()) {
+                    $this->connection->exec('ROLLBACK TO SAVEPOINT ' . $name);
+                    $this->connection->exec('RELEASE SAVEPOINT ' . $name);
+                }
+                throw $error;
+            }
         }
         $this->connection->beginTransaction();
         try {
