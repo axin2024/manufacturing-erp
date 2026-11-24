@@ -1,0 +1,16 @@
+{
+    "name": "manufacturing-erp/manufacturing-erp",
+    "description": "Self-hosted ERP for manufacturing and trading groups",
+    "type": "project",
+    "license": "Apache-2.0",
+    "require": {
+        "php": ">=8.2",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "ManufacturingErp\\": "src/"
+        }
+    }
+}
