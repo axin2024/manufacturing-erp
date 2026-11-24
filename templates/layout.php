@@ -56,7 +56,7 @@ use ManufacturingErp\WebView;
             <aside class="sidebar">
                 <nav aria-label="业务模块">
                     <?php foreach ($menu as $slug => [$label, $icon]): ?>
-                        <a href="<?= WebView::e(WebView::url($slug)) ?>" <?= $slug === $page ? 'aria-current="page"' : '' ?>>
+                        <a href="<?= WebView::e(WebView::url($slug)) ?>" <?= $slug === ($screen['navigation'] ?? $page) ? 'aria-current="page"' : '' ?>>
                             <span aria-hidden="true"><?= WebView::e($icon) ?></span><?= WebView::e($label) ?>
                         </a>
                     <?php endforeach; ?>

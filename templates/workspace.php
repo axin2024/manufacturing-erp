@@ -7,8 +7,27 @@ use ManufacturingErp\WebView;
     <?php endif; ?>
     <h1><?= WebView::e($screen['title']) ?></h1>
 </div>
+<?php if (($screen['links'] ?? []) !== []): ?>
+    <div class="toolbar" aria-label="相关页面">
+        <?php foreach ($screen['links'] as $link): ?>
+            <a class="button" href="<?= WebView::e($link['url']) ?>"><?= WebView::e($link['label']) ?></a>
+        <?php endforeach; ?>
+    </div>
+<?php endif; ?>
 <?php if (isset($screen['notification'])): ?>
     <p class="alert" role="status"><?= WebView::e($screen['notification']['message']) ?></p>
+<?php endif; ?>
+<?php if (($screen['filters'] ?? []) !== []): ?>
+    <form class="filters" method="get" action="/">
+        <input type="hidden" name="page" value="<?= WebView::e($page) ?>">
+        <?php foreach ($screen['filters'] as $field): ?>
+            <label><?= WebView::e($field['label']) ?>
+                <input name="<?= WebView::e($field['name']) ?>" type="<?= WebView::e($field['type']) ?>"
+                    value="<?= WebView::e($field['value']) ?>" required>
+            </label>
+        <?php endforeach; ?>
+        <button class="button" type="submit">查询</button>
+    </form>
 <?php endif; ?>
 <?php if (isset($screen['demo'])): ?>
     <section class="demo" aria-labelledby="demo-title">

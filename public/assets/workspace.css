@@ -43,6 +43,9 @@ h2 { font-size: 1.18rem; font-weight: 700; }
 .sidebar-footer span { padding-inline: .3rem; }
 .content { width: 100%; max-width: 1550px; min-width: 0; padding: clamp(18px, 3vw, 42px); display: grid; gap: 18px; align-content: start; }
 .page-head { display: grid; gap: 5px; align-items: start; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.filters label { display: grid; gap: 5px; color: var(--muted); }
 .breadcrumb { width: fit-content; color: var(--muted); }
 .demo { padding: 22px 24px; background: var(--deep); color: white; border-radius: 14px; }
 .section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }

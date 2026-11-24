@@ -4,12 +4,18 @@ declare(strict_types=1);
 
 namespace ManufacturingErp;
 
-final class Workspace extends Service
+final class Workspace extends WorkspaceScreen
 {
     private const MENU = [
         'home' => ['工作台', '▦', []],
         'sales' => ['销售与交付', '↗', ['sales','planner','warehouse','finance']],
         'planning' => ['物料计划', '◇', ['planner','buyer','production']],
+        'purchases' => ['采购', '▤', ['buyer','planner','warehouse','finance']],
+        'inventory' => ['批次库存', '□', ['warehouse','planner','buyer','production','quality','finance']],
+        'work' => ['制造与委外', '⚙', ['planner','production','warehouse','quality','finance','buyer']],
+        'quality' => ['质量检验', '✓', ['quality','warehouse','production','buyer','finance']],
+        'shipments' => ['出库交付', '↗', ['sales','warehouse','finance','quality']],
+        'finance' => ['财务与月结', '¥', ['finance']],
         'jobs' => ['批量任务', '≡', ['planner','warehouse']],
     ];
 
@@ -22,15 +28,27 @@ final class Workspace extends Service
     {
         $id = isset($parameters['id']) ? WebInput::integer($parameters['id'], '对象编号') : null;
         $before = isset($parameters['before']) ? WebInput::integer($parameters['before'], '分页游标') : PHP_INT_MAX;
-        return match ($page) {
+        $screen = match ($page) {
             'home' => $this->home(),
             'sales' => $this->sales($id, $before),
             'planning' => $this->planning($id, $before, WebInput::stringParameter($parameters, 'ref'),
                 WebInput::stringParameter($parameters, 'after'), WebInput::stringParameter($parameters, 'diff_after')),
             'jobs' => $this->jobs($id, $before, isset($parameters['row']) ? WebInput::integer($parameters['row'], '任务行号') : null,
                 isset($parameters['after']) ? WebInput::integer($parameters['after'], '分页游标') : 0),
+            'purchases', 'sourcing', 'inbound', 'inventory', 'trace', 'work', 'vendors', 'quality', 'shipments'
+                => (new OperationsWorkspace($this->db, $this->scope))->screen($page, $id, $before, $parameters),
+            'finance', 'receivables', 'payables', 'bill', 'journals', 'trial', 'intercompany'
+                => (new FinanceWorkspace($this->db, $this->scope))->screen($page, $id, $before, $parameters),
             default => throw new BusinessError('找不到此页面。', 404),
         };
+        $screen['navigation'] = match ($page) {
+            'sourcing', 'inbound' => 'purchases',
+            'trace' => 'inventory',
+            'vendors' => 'work',
+            'receivables', 'payables', 'bill', 'journals', 'trial', 'intercompany' => 'finance',
+            default => $page,
+        };
+        return $screen;
     }
 
     private function home(): array
@@ -42,6 +60,18 @@ final class Workspace extends Service
         }
         if ($this->scope->can('planner')) {
             $queues['planning'] = ['待审核计划', $this->db->row("SELECT COUNT(*) AS total FROM mrp_runs WHERE org_id=? AND state='review'", [$org])];
+        }
+        if ($this->scope->can('buyer')) {
+            $queues['purchases'] = ['待下单采购单', $this->db->row("SELECT COUNT(*) AS total FROM purchase_orders WHERE org_id=? AND state='draft'", [$org])];
+        }
+        if ($this->scope->can('production')) {
+            $queues['work'] = ['待开工或执行中', $this->db->row("SELECT COUNT(*) AS total FROM work_orders WHERE org_id=? AND state IN ('released','active')", [$org])];
+        }
+        if ($this->scope->can('quality')) {
+            $queues['quality'] = ['待判定检验单', $this->db->row("SELECT COUNT(*) AS total FROM inspection_cases WHERE org_id=? AND state<>'completed'", [$org])];
+        }
+        if ($this->scope->can('finance')) {
+            $queues['finance'] = ['待关账期间', $this->db->row("SELECT COUNT(*) AS total FROM fiscal_periods WHERE org_id=? AND state='open'", [$org])];
         }
         if ($this->scope->can('planner', 'warehouse')) {
             $kinds = array_keys(array_filter(BatchJobs::ROLES, fn(string $role): bool => $this->scope->can($role)));
@@ -65,9 +95,9 @@ final class Workspace extends Service
             'date' => $demo['as_of'],
             'metrics' => [
                 ['label' => '净缺定位销', 'value' => WebView::scaled($facts['pin_shortage_milli'], 3) . ' 件', 'url' => WebView::url('planning', $objects['planning_run_id'])],
-                ['label' => '替代料成本差', 'value' => '¥' . WebView::scaled($facts['material_variance_minor'], 2)],
-                ['label' => '首批已交付', 'value' => WebView::scaled($facts['shipped_milli'], 3) . ' 台', 'url' => WebView::url('sales', $objects['sales_order_id'])],
-                ['label' => '待返工', 'value' => WebView::scaled($facts['outstanding_milli'], 3) . ' 台'],
+                ['label' => '替代料成本差', 'value' => '¥' . WebView::scaled($facts['material_variance_minor'], 2), 'url' => WebView::url('work', $objects['work_id'])],
+                ['label' => '首批已交付', 'value' => WebView::scaled($facts['shipped_milli'], 3) . ' 台', 'url' => WebView::url('shipments', $objects['shipment_id'])],
+                ['label' => '待返工', 'value' => WebView::scaled($facts['outstanding_milli'], 3) . ' 台', 'url' => WebView::url('work', $objects['rework_id'])],
             ],
         ];
         return $screen;
@@ -208,29 +238,4 @@ final class Workspace extends Service
         return ['title' => '批量任务 #' . $id, 'parent' => ['jobs', '批量任务'], 'details' => $details, 'forms' => $forms, 'tables' => $tables];
     }
 
-    private function form(string $title, string $action, array $fields, array $hidden = [], string $hint = ''): array
-    {
-        return compact('title', 'action', 'fields', 'hidden', 'hint');
-    }
-
-    private function paged(array $rows, string $field, string $page, ?int $id = null, string $cursor = 'before', array $other = []): array
-    {
-        $next = null;
-        if (count($rows) > 50) {
-            array_pop($rows);
-            $next = WebView::url($page, $id, [$cursor => $rows[49][$field], ...$other]);
-        }
-        return ['rows' => $rows, 'next' => $next];
-    }
-
-    private function table(string $title, array $columns, array $rows, ?string $route = null, ?string $link = null, ?string $next = null): array
-    {
-        if ($route !== null && $link !== null) {
-            foreach ($rows as &$row) {
-                $row['_links'][$link] = WebView::url($route, (int) $row['id']);
-            }
-            unset($row);
-        }
-        return ['title' => $title, 'columns' => $columns, 'rows' => $rows, 'next' => $next];
-    }
 }
