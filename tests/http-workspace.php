@@ -9,8 +9,7 @@ use ManufacturingErp\Identity;
 use ManufacturingErp\Inventory;
 use ManufacturingErp\MasterData;
 use ManufacturingErp\ProductEngineering;
-use ManufacturingErp\Subcontracting;
-use ManufacturingErp\SubcontractMaterials;
+use ManufacturingErp\Scheduling;
 use ManufacturingErp\Value;
 use ManufacturingErp\WorkOrders;
 
@@ -105,15 +104,6 @@ $day = $fixture['as_of'];
 (new ProductEngineering($db, $scope))->publishBom($output, $day, [['item' => $input, 'quantity' => 1000, 'uom' => 'ea']]);
 $vendorLot = (new Inventory($db, $scope))->openingBalance('http-vendor-stock', $input, $raw, 'HTTP-VENDOR-STOCK', 'ea', 3000, 100, $day)['lot_id'];
 $works = new WorkOrders($db, $scope);
-$vendorWork = $works->create('http-vendor-work', 'WO-COATING', $output, 2000, $day, $day, $day)['work_id'];
-$works->approve($vendorWork);
-$vendor = new Subcontracting($db, $scope);
-$contract = $vendor->create('http-vendor-order', 'OUT-COATING', $vendorWork, $supplier, $day, 100)['subcontract_id'];
-$works->release($vendorWork);
-$material = $works->details($vendorWork)['materials'][0]['id'];
-$dispatch = (new SubcontractMaterials($db, $scope))->send('http-vendor-send', $contract, $material, $vendorLot, $raw, 2000, $day)['dispatch_id'];
-$returned = $vendor->receive('http-vendor-return', $contract, $raw, 'OUT-COATED', 2000, $day, [['dispatch_id' => $dispatch, 'quantity' => 2000]]);
-$vendor->matchFee('http-vendor-fee', $returned['fee_id'], 'VENDOR-COATING-01', 175, $day, 'Quoted processing rebate settled.');
 
 $client = new WebTestClient($base);
 $guest = $client->get('/?page=session');
@@ -144,6 +134,46 @@ same(200, $csv['status'], 'Browser can download the lot recall CSV');
 same(true, str_starts_with($csv['body'], "\xEF\xBB\xBF"), 'Binary response preserves the CSV BOM');
 same(true, str_contains($csv['body'], 'SHIP-DEVICE-98'), 'Downloaded recall file contains the actual shipment');
 same('attachment; filename="lot-trace-' . $stock['substitute_lot_id'] . '.csv"', $csv['headers']['content-disposition'], 'The exported filename is stable');
+
+$vendorWorkInput = ['number' => 'WO-COATING', 'item' => $output, 'quantity' => '2', 'engineering_on' => $day,
+    'starts_on' => $day, 'due_on' => $day, 'request_key' => 'http-vendor-work'];
+$vendorWork = $client->post('create-work', $vendorWorkInput, $csrf)['body']['work_id'];
+$client->post('approve-work', ['id' => $vendorWork], $csrf);
+same(409, $client->post('release-work', ['id' => $vendorWork], $csrf)['status'], 'Outside processing requires an approved vendor contract');
+same(true, str_contains($client->get('/?page=vendors', false)['body'], 'WO-COATING'), 'Vendor picker shows the unsigned outside work order');
+$contractResult = $client->post('create-vendor-contract', ['work' => $vendorWork, 'number' => 'OUT-COATING', 'supplier' => $supplier,
+    'unit_fee' => '1.00', 'posted_on' => $day, 'request_key' => 'http-vendor-order'], $csrf);
+same(201, $contractResult['status'], 'Buyer records the chosen outside supplier and fee');
+$contract = $contractResult['body']['subcontract_id'];
+same('released', $client->post('release-work', ['id' => $vendorWork], $csrf)['body']['state'], 'Contract makes outside production releasable');
+$material = $works->details($vendorWork)['materials'][0]['id'];
+$extra = $client->post('authorize-material', ['material' => $material, 'kind' => 'overage', 'use_item' => $input, 'quantity' => '0.5',
+    'reason' => 'Additional setup blanks', 'request_key' => 'http-vendor-extra'], $csrf)['body']['authorization_id'];
+same(true, str_contains($client->get('/?page=vendors&id=' . $contract, false)['body'], 'HTTP-VENDOR-STOCK'), 'Outside dispatch picks a real input lot');
+$dispatchInput = ['id' => $contract, 'material' => $material, 'lot' => $vendorLot, 'location' => $raw, 'quantity' => '2.5',
+    'posted_on' => $day, 'request_key' => 'http-vendor-send', 'overage' => $extra];
+$dispatchResponse = $client->post('send-vendor-material', $dispatchInput, $csrf);
+same(201, $dispatchResponse['status'], 'Warehouse sends authorized stock to the contractor');
+$dispatch = $dispatchResponse['body']['dispatch_id'];
+$receiptResult = $client->post('receive-vendor-output', ['id' => $contract, 'location' => $raw, 'lot' => 'OUT-COATED', 'quantity' => '2',
+    'posted_on' => $day, 'request_key' => 'http-vendor-receive', 'uses' => [['dispatch_id' => $dispatch, 'quantity' => '2']]], $csrf);
+same(201, $receiptResult['status'], 'Subcontract output uses actual dispatched inputs');
+same(400, $receiptResult['body']['actual_minor'], 'Input values and contract fee are both capitalized');
+$pendingVendorLot = $receiptResult['body']['inspection_id'];
+same('2', $client->get('/?page=quality&id=' . $pendingVendorLot)['body']['details']['待检'], 'Vendor output appears in quality');
+$recoveryInput = ['dispatch' => $dispatch, 'location' => $raw, 'quantity' => '0.25', 'posted_on' => $day,
+    'reason' => 'Unused material received from vendor', 'request_key' => 'http-vendor-recover'];
+$recovery = $client->post('return-vendor-material', $recoveryInput, $csrf);
+same(250, $recovery['body']['outside_milli'], 'Material physically returned reduces contractor custody');
+$lossInput = ['dispatch' => $dispatch, 'quantity' => '0.25', 'posted_on' => $day, 'reason' => 'Supplier reported tooling loss',
+    'request_key' => 'http-vendor-loss'];
+$lost = $client->post('write-off-vendor-material', $lossInput, $csrf);
+same(0, $lost['body']['outside_milli'], 'The separately posted loss clears remaining contractor custody');
+same($lost['body']['recovery_id'], $client->get('/?page=receipt&operation=vendor.recover&request_key=http-vendor-loss')['body']['result']['recovery_id'],
+    'Vendor reconciliation is recoverable by request key');
+$feeResult = $client->post('match-vendor-fee', ['fee' => $receiptResult['body']['fee_id'], 'invoice' => 'VENDOR-COATING-01',
+    'amount' => '1.75', 'posted_on' => $day, 'reason' => 'Approved supplier rebate', 'request_key' => 'http-vendor-fee'], $csrf);
+same(-25, $feeResult['body']['variance_minor'], 'Confirmed fee difference remains signed');
 
 $sourcing = $client->get('/?page=sourcing')['body']['tables'][0]['rows'][0];
 $billId = $client->get('/?page=payables&id=' . $stock['payable_id'])['body']['links'][0]['url'];
@@ -325,6 +355,66 @@ $disposition = $cancelDemand['body']['dispositions'][0];
 same('shipping', $disposition['source_kind'], 'Cancel preserves a traceable disposition for the already dispatched units');
 same('resolved', $client->post('resolve-disposition', ['id' => $disposition['id'],
     'reason' => 'Keep the completed shipment and invoice'], $csrf)['body']['state'], 'A planner records the disposition');
+
+$buildOn = '2037-06-18';
+$dept = $master->createDepartment('SHOP-HTTP', 'HTTP engineering shop');
+$engineering = new ProductEngineering($db, $scope);
+$center = $engineering->addCenter($dept, 'SHOP-HTTP', 'Bench production');
+$scheduling = new Scheduling($db, $scope);
+$machine = $scheduling->addMachine($center, 'MACHINE-HTTP', 'HTTP fabrication bench');
+$scheduling->addShift($center, $buildOn . ' 08:00:00', $buildOn . ' 17:00:00');
+$product = $master->addItem('HTTP-PRODUCED', 'HTTP assembled part', 'ea', 'manufacture', 650, 0);
+$engineering->publishBom($product, $day, [['item' => $input, 'quantity' => 1000, 'uom' => 'ea']]);
+$engineering->publishRoute($product, $day, [['center' => $center, 'label' => 'HTTP Bench Assembly', 'setup_minutes' => 1, 'run_seconds_per_unit' => 5]]);
+$workInput = ['number' => 'WO-HTTP-PRODUCTION', 'item' => $product, 'quantity' => '2', 'engineering_on' => $day,
+    'starts_on' => $buildOn, 'due_on' => $buildOn, 'request_key' => 'new-web-work-' . $tag];
+$newWork = $client->post('create-work', $workInput, $csrf);
+same(201, $newWork['status'], 'Planning can create a shop order with a frozen routing by HTTP');
+$workId = $newWork['body']['work_id'];
+same('approved', $client->post('approve-work', ['id' => $workId], $csrf)['body']['state'], 'Shop order proceeds to capacity reservation');
+same(409, $client->post('release-work', ['id' => $workId], $csrf)['status'], 'Workbench cannot release an unscheduled operation');
+$bookPage = $client->get('/?page=work&id=' . $workId, false);
+same(true, str_contains($bookPage['body'], 'MACHINE-HTTP'), 'Work screen lists machines in the frozen work centers');
+$detail = $works->details($workId);
+$operationId = $detail['operations'][0]['id'];
+$lineId = $detail['materials'][0]['id'];
+$booked = $client->post('book-operation', ['operation' => $operationId, 'machine' => $machine, 'starts_at' => $buildOn . 'T08:00',
+    'ends_at' => $buildOn . 'T09:00', 'request_key' => 'work-book-' . $tag], $csrf);
+same(201, $booked['status'], 'Planner reserves working time in the actual shift');
+same('released', $client->post('release-work', ['id' => $workId], $csrf)['body']['state'], 'Reserved shop order can be released');
+same('paused', $client->post('pause-work', ['id' => $workId, 'reason' => 'Machine setup check'], $csrf)['body']['state'],
+    'Production can pause the released order');
+same('released', $client->post('resume-work', ['id' => $workId], $csrf)['body']['state'], 'An unstarted paused order resumes as released');
+$overage = $client->post('authorize-material', ['material' => $lineId, 'kind' => 'overage', 'use_item' => $input,
+    'quantity' => '0.50', 'reason' => 'Extra physical blanks for setup', 'request_key' => 'work-overage-' . $tag], $csrf);
+same(201, $overage['status'], 'Planner authorizes exact excess quantity');
+$issueInput = ['material' => $lineId, 'lot' => $outboundLot, 'location' => $raw, 'quantity' => '2.50',
+    'posted_on' => $buildOn, 'request_key' => 'work-issue-http-' . $tag];
+same(409, $client->post('issue-material', $issueInput, $csrf)['status'], 'Warehouse cannot issue excess stock without the approval');
+$issueResult = $client->post('issue-material', $issueInput + ['overage' => $overage['body']['authorization_id']], $csrf);
+same(201, $issueResult['status'], 'Approved material issue posts the exact requested lot quantity');
+$issueId = $issueResult['body']['issue_id'];
+$actual = $client->post('report-operation', ['operation' => $operationId, 'starts_at' => $buildOn . 'T08:00',
+    'ends_at' => $buildOn . 'T08:30', 'labor_rate' => '16', 'overhead_rate' => '4', 'request_key' => 'work-actual-http-' . $tag], $csrf);
+same(1800, $actual['body']['actual_seconds'], 'Actual time remains separate from standard capacity');
+$workComplete = $client->get('/?page=work&id=' . $workId, false);
+same(true, str_contains($workComplete['body'], '完工并提交质检'), 'Actual completion form shows after operations are posted');
+$completedWork = $client->post('complete-work', ['id' => $workId, 'location' => $dock, 'lot' => 'HTTP-MANUFACTURED',
+    'quantity' => '2', 'posted_on' => $buildOn, 'request_key' => 'work-complete-http-' . $tag,
+    'uses' => [['issue_id' => $issueId, 'quantity' => '2']]], $csrf);
+same(201, $completedWork['status'], 'Production reports output and sends it to inspection');
+same(1200, $completedWork['body']['actual_minor'], 'Completed lot values consumed material, labor and overhead');
+$closeInput = ['id' => $workId, 'posted_on' => $buildOn];
+$blockedWork = $client->post('close-work', $closeInput, $csrf);
+same(409, $blockedWork['status'], 'Work order with pending inspection and unused material cannot close');
+same(true, in_array('pending_inspection', array_column($blockedWork['body']['blockers'], 'kind'), true), 'Pending inspection is named in the close response');
+$returnedStock = $client->post('return-material', ['issue' => $issueId, 'location' => $raw, 'quantity' => '0.50',
+    'posted_on' => $buildOn, 'request_key' => 'work-return-http-' . $tag], $csrf);
+same(201, $returnedStock['status'], 'Unused material is returned from the original issue');
+same('completed', $client->post('decide-inspection', ['id' => $completedWork['body']['inspection_id'], 'version' => 1,
+    'accepted' => '2', 'rejected' => '0', 'rework' => '0', 'measured_on' => $buildOn, 'reason' => 'Two units conform',
+    'request_key' => 'work-inspection-http-' . $tag], $csrf)['body']['state'], 'Internal production output is released by quality');
+same('closed', $client->post('close-work', $closeInput, $csrf)['body']['state'], 'Reconciled work order closes in the same ledger');
 
 $closed = $client->post('close-period', ['period' => $day], $csrf);
 same(200, $closed['status'], 'Financial period closes through the authorized HTTP action');

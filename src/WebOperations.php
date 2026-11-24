@@ -16,8 +16,18 @@ final class WebOperations extends Service
         'purchase.quote' => ['buyer'],
         'purchase.create' => ['buyer'],
         'purchase.receive' => ['warehouse'],
+        'work.create' => ['planner'],
+        'capacity.book' => ['planner'],
+        'work.operation_actual' => ['production'],
+        'work.authorize_material' => ['planner'],
         'work.issue' => ['production','warehouse'],
+        'work.return' => ['production','warehouse'],
         'work.complete' => ['production'],
+        'vendor.create' => ['buyer'],
+        'vendor.send' => ['warehouse','production'],
+        'vendor.recover' => ['warehouse','production','finance'],
+        'vendor.complete' => ['warehouse','production'],
+        'vendor.match_fee' => ['finance'],
         'quality.decide' => ['quality'],
         'shipping.dispatch' => ['warehouse'],
         'shipping.reserve' => ['warehouse','sales'],
@@ -45,6 +55,11 @@ final class WebOperations extends Service
             'create-sale', 'cancel-demand', 'resolve-disposition', 'open-stock', 'move-stock',
             'reserve-stock', 'release-reservation', 'dispatch-delivery'
                 => (new DeliveryActions($this->db, $this->scope))->execute($action, $input),
+            'create-work', 'approve-work', 'release-work', 'pause-work', 'resume-work', 'cancel-work', 'close-work',
+            'book-operation', 'report-operation', 'authorize-material', 'issue-material', 'return-material', 'complete-work'
+                => (new WorkshopActions($this->db, $this->scope))->execute($action, $input),
+            'create-vendor-contract', 'send-vendor-material', 'return-vendor-material', 'write-off-vendor-material',
+            'receive-vendor-output', 'match-vendor-fee' => (new VendorActions($this->db, $this->scope))->execute($action, $input),
             default => throw new BusinessError('找不到此操作。', 404),
         };
     }
@@ -60,6 +75,10 @@ final class WebOperations extends Service
         $result = Value::fromJson($row['result']);
         if ($operation === 'jobs.enqueue') {
             Value::assert($this->scope->can(BatchJobs::ROLES[$result['kind']]), '未找到此请求的有效回执。', 404);
+        }
+        if ($operation === 'vendor.recover') {
+            $roles = $result['kind'] === 'loss' ? ['finance'] : ['warehouse','production'];
+            Value::assert($this->scope->can(...$roles), '未找到此请求的有效回执。', 404);
         }
         return ['request_key' => $key, 'operation' => $operation, 'organization_id' => $this->scope->org,
             'created_at' => $row['created_at'], 'result' => $result];

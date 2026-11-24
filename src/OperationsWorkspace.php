@@ -235,9 +235,10 @@ final class OperationsWorkspace extends WorkspaceScreen
     private function work(?int $id, int $before, array $parameters): array
     {
         $work = new WorkOrders($this->db, $this->scope);
+        $actions = new WorkshopForms($this->db, $this->scope);
         if ($id === null) {
             $links = $this->scope->can('buyer', 'production', 'warehouse', 'planner', 'finance') ? [$this->link('委外加工单', 'vendors')] : [];
-            return ['title' => '生产工单', 'links' => $links, 'tables' => [
+            return ['title' => '生产工单', 'links' => $links, 'forms' => $actions->creation(), 'tables' => [
                 $this->listTable('生产工单', ['number' => '工单号', 'kind' => '类型', 'code' => '物料', 'qty_milli' => '计划数量',
                     'produced_milli' => '完工数量', 'due_on' => '计划完成', 'state' => '状态'], $work->orders($before), 'work', 'number'),
             ]];
@@ -267,16 +268,20 @@ final class OperationsWorkspace extends WorkspaceScreen
         if ($record['parent_work_id'] !== null) {
             $links[] = $this->link('原生产工单', 'work', (int) $record['parent_work_id']);
         }
+        $hasContract = false;
         if ($record['kind'] === 'subcontract' && $this->scope->can('buyer', 'production', 'warehouse', 'planner', 'finance')) {
             $contract = $this->db->row('SELECT id FROM subcontract_orders WHERE org_id=? AND work_id=?', [$this->scope->org, $id]);
             if ($contract !== null) {
                 $links[] = $this->link('关联委外加工单', 'vendors', (int) $contract['id']);
+                $hasContract = true;
+            } elseif ($this->scope->can('buyer') && in_array($record['state'], ['draft','approved'], true)) {
+                $links[] = $this->link('登记加工方及费用', 'vendors');
             }
         }
         $issueBefore = isset($parameters['issue_before']) ? WebInput::integer($parameters['issue_before'], '领料分页游标') : PHP_INT_MAX;
         $costBefore = isset($parameters['cost_before']) ? WebInput::integer($parameters['cost_before'], '成本分页游标') : PHP_INT_MAX;
         $this->workLedgerTables($id, $issueBefore, $costBefore, $tables, $links);
-        return ['title' => $record['number'], 'parent' => ['work', '生产工单'], 'links' => $links,
+        return ['title' => $record['number'], 'parent' => ['work', '生产工单'], 'links' => $links, 'forms' => $actions->forOrder($record, $hasContract),
             'details' => ['物料' => $record['item_code'] . ' ' . $record['item_name'], '状态' => WebView::state($record['state']),
                 '工单类型' => WebView::state($record['kind']), 'BOM 版本' => $record['bom_id'], '工艺版本' => $record['route_id'],
                 '计划开工' => $record['starts_on'], '计划完成' => $record['due_on'], '来源建议' => $record['proposal_id']],
@@ -315,14 +320,16 @@ final class OperationsWorkspace extends WorkspaceScreen
     private function vendors(?int $id, int $before): array
     {
         $service = new Subcontracting($this->db, $this->scope);
+        $actions = new VendorForms($this->db, $this->scope);
         if ($id === null) {
-            return ['title' => '委外加工单', 'parent' => ['work', '生产工单'], 'tables' => [
+            return ['title' => '委外加工单', 'parent' => ['work', '生产工单'], 'forms' => $actions->creation(), 'tables' => [
                 $this->listTable('委外加工单', ['number' => '委外单号', 'supplier' => '加工方', 'work_number' => '生产工单号',
                     'contract_on' => '合同日期', 'state' => '工单状态'], $service->orders($before), 'vendors', 'number'),
             ]];
         }
         $vendor = $service->details($id);
         return ['title' => $vendor['number'], 'parent' => ['vendors', '委外加工单'], 'links' => [$this->link('生产工单', 'work', (int) $vendor['work_id'])],
+            'forms' => $actions->forOrder($vendor),
             'details' => ['加工方' => $vendor['supplier_name'], '合同日期' => $vendor['contract_on']],
             'tables' => [
                 $this->table('加工方物料留存', ['id' => '发料记录', 'lot_code' => '批号', 'sent_milli' => '发料', 'used_milli' => '加工耗用',

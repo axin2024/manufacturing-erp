@@ -85,6 +85,7 @@ final class FinanceWorkspace extends WorkspaceScreen
         $source = match ($item['source_kind']) {
             'shipment' => $this->link('关联交货单', 'shipments', (int) $item['source_id']),
             'purchase_bill' => $this->link('关联采购发票', 'bill', (int) $item['source_id']),
+            'vendor_invoice' => $this->vendorLink((int) $item['source_id']),
             default => null,
         };
         $forms = (int) $item['open_minor'] > 0 ? [$this->requestForm('登记' . WebView::state($direction) . '核销', 'settle-open-item', [
@@ -99,6 +100,12 @@ final class FinanceWorkspace extends WorkspaceScreen
                 '待核销' => WebView::scaled($item['open_minor'], 2)],
             'tables' => [$this->table('核销明细', ['reference' => '核销单号', 'amount_minor' => '核销金额',
                 'posted_on' => '核销日', 'actor_id' => '经手人编号'], $item['settlements'])]];
+    }
+
+    private function vendorLink(int $fee): ?array
+    {
+        $row = $this->db->row('SELECT subcontract_id FROM subcontract_fees WHERE org_id=? AND id=?', [$this->scope->org, $fee]);
+        return $row === null ? null : $this->link('关联委外加工单', 'vendors', (int) $row['subcontract_id']);
     }
 
     private function invoiceForms(): array
