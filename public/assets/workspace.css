@@ -92,6 +92,9 @@ textarea { resize: vertical; font-family: ui-monospace, Consolas, monospace; }
 .operation summary { cursor: pointer; padding: 11px 15px; font-weight: 650; color: var(--teal); }
 .operation form { padding: 0 16px 16px; }
 .operation form button { justify-self: start; }
+.line-group { display: grid; gap: 10px; }
+.document-line { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr)); gap: 12px; align-items: end; border: 1px solid var(--line); border-radius: 8px; margin: 0; padding: 12px; min-width: 0; }
+.document-line legend { color: var(--muted); font-weight: 620; padding: 0 5px; }
 .note { color: var(--muted); }
 .alert { border-radius: 8px; background: var(--mint); color: var(--deep); padding: 12px 14px; line-height: 1.45; }
 .alert.error { background: #fceceb; color: #8c302c; }

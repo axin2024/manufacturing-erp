@@ -40,6 +40,38 @@ final class WebInput
         return Value::scaled($value, $precision, $maximum);
     }
 
+    public static function id(array $input, string $key): int
+    {
+        return self::integer($input[$key] ?? null, '记录编号');
+    }
+
+    public static function optionalId(array $input, string $key): ?int
+    {
+        return !isset($input[$key]) || $input[$key] === '' ? null : self::id($input, $key);
+    }
+
+    public static function quantity(array $input, string $key): int
+    {
+        return self::decimal($input[$key] ?? null, 3, Value::MAX_QUANTITY);
+    }
+
+    public static function price(array $input, string $key): int
+    {
+        return self::decimal($input[$key] ?? null, 2, Value::MAX_UNIT_PRICE);
+    }
+
+    public static function lines(array $input, string $key, callable $parse, int $maximum = 100): array
+    {
+        $rows = $input[$key] ?? null;
+        Value::assert(is_array($rows) && count($rows) > 0 && count($rows) <= $maximum, '单据行数超出有效范围。');
+        $result = [];
+        foreach ($rows as $index => $row) {
+            Value::assert(is_int($index) && $index >= 0 && is_array($row) && !array_is_list($row), '单据行格式无效。');
+            $result[] = $parse($row);
+        }
+        return $result;
+    }
+
     public static function timestamp(mixed $value): string
     {
         Value::assert(is_string($value), '时间格式无效。');

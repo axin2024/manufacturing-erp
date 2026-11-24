@@ -9,6 +9,7 @@ use ManufacturingErp\WebView;
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= WebView::e($screen['title']) ?> · 制造集团 ERP</title>
     <link rel="stylesheet" href="/assets/workspace.css">
+    <script src="/assets/workspace.js" defer></script>
 </head>
 <body>
 <?php if ($template === 'login'): ?>

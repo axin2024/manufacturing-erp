@@ -38,6 +38,53 @@ abstract class WorkspaceScreen extends Service
         return compact('title', 'action', 'fields', 'hidden', 'hint');
     }
 
+    protected function requestForm(string $title, string $action, array $fields, array $hidden = [], string $hint = ''): array
+    {
+        return $this->form($title, $action, $fields, ['request_key' => bin2hex(random_bytes(16))] + $hidden, $hint);
+    }
+
+    protected function field(string $name, string $label, string $type = 'text', array $settings = []): array
+    {
+        return compact('name', 'label', 'type') + $settings;
+    }
+
+    protected function quantityField(string $name, string $label, bool $allowZero = false): array
+    {
+        return $this->field($name, $label, 'number', $allowZero ? ['min' => '0', 'step' => '0.001', 'value' => '0']
+            : ['min' => '0.001', 'step' => '0.001']);
+    }
+
+    protected function dateField(string $name, string $label): array
+    {
+        return $this->field($name, $label, 'date', ['value' => gmdate('Y-m-d')]);
+    }
+
+    protected function options(array $rows, string $label, ?string $description = null): array
+    {
+        $options = [];
+        foreach ($rows as $row) {
+            $options[$row['id']] = $row[$label] . ($description === null ? '' : ' · ' . $row[$description]);
+        }
+        return $options;
+    }
+
+    protected function locations(): array
+    {
+        return $this->options($this->db->rows('SELECT id,code,name FROM locations WHERE org_id=? ORDER BY code', [$this->scope->org]), 'code', 'name');
+    }
+
+    protected function parties(string $kind): array
+    {
+        return $this->options($this->db->rows("SELECT id,code,name FROM parties WHERE org_id=? AND kind IN (?, 'both') ORDER BY code",
+            [$this->scope->org, $kind]), 'code', 'name');
+    }
+
+    protected function items(): array
+    {
+        return $this->options($this->db->rows('SELECT i.id,i.code,i.name FROM org_items x JOIN items i ON i.id=x.item_id
+            WHERE x.org_id=? ORDER BY i.code', [$this->scope->org]), 'code', 'name');
+    }
+
     protected function link(string $label, string $page, ?int $id = null, array $parameters = []): array
     {
         return ['label' => $label, 'url' => WebView::url($page, $id, $parameters)];

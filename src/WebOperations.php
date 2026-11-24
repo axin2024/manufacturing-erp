@@ -11,6 +11,9 @@ final class WebOperations extends Service
         'stock.opening' => ['warehouse'],
         'stock.transfer' => ['warehouse'],
         'mrp.calculate' => ['planner'],
+        'purchase.rfq' => ['buyer'],
+        'purchase.quote' => ['buyer'],
+        'purchase.create' => ['buyer'],
         'purchase.receive' => ['warehouse'],
         'work.issue' => ['production','warehouse'],
         'work.complete' => ['production'],
@@ -27,6 +30,9 @@ final class WebOperations extends Service
             'enqueue-job' => $this->enqueueJob($input),
             'retry-job' => $this->retryJob($input),
             'cancel-job' => $this->cancelJob($input),
+            'create-purchase', 'issue-purchase', 'stop-purchase', 'receive-purchase',
+            'create-rfq', 'record-quote', 'award-rfq', 'decide-inspection'
+                => (new ProcurementActions($this->db, $this->scope))->execute($action, $input),
             default => throw new BusinessError('找不到此操作。', 404),
         };
     }

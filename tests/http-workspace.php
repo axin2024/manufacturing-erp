@@ -35,20 +35,26 @@ final class WebTestClient
         return $this->request('/?action=' . rawurlencode($action), $data, $csrf, true);
     }
 
-    private function request(string $route, ?array $data, string $csrf, bool $json): array
+    public function submit(string $action, array $data, string $csrf): array
+    {
+        return $this->request('/?action=' . rawurlencode($action), $data + ['_csrf' => $csrf], '', false, true);
+    }
+
+    private function request(string $route, ?array $data, string $csrf, bool $json, bool $form = false): array
     {
         $headers = ['Accept: ' . ($json ? 'application/json' : 'text/html'), 'Connection: close'];
         if ($this->cookie !== '') {
             $headers[] = 'Cookie: ' . $this->cookie;
         }
         if ($data !== null) {
-            $headers[] = 'Content-Type: application/json';
+            $headers[] = 'Content-Type: ' . ($form ? 'application/x-www-form-urlencoded' : 'application/json');
         }
         if ($csrf !== '') {
             $headers[] = 'X-CSRF-Token: ' . $csrf;
         }
         $stream = stream_context_create(['http' => [
-            'method' => $data === null ? 'GET' : 'POST', 'header' => $headers, 'content' => $data === null ? '' : Value::json($data),
+            'method' => $data === null ? 'GET' : 'POST', 'header' => $headers,
+            'content' => $data === null ? '' : ($form ? http_build_query($data) : Value::json($data)),
             'timeout' => 20, 'ignore_errors' => true, 'follow_location' => 0,
         ]]);
         $body = file_get_contents($this->base . $route, false, $stream);
@@ -181,6 +187,57 @@ same(2000, (int) array_column($summaries[0]['rows'], 'variance_minor', 'element'
 same(404, $client->get('/?page=payables&id=' . $stock['receivable_id'])['status'], 'AR cannot be read through the AP route');
 $openReview = $client->get('/?page=finance&period=' . $day)['body'];
 same('开放', $openReview['details']['状态'], 'Open fiscal review is distinguishable from archived snapshots');
+
+$rfq = $client->post('create-rfq', ['number' => 'RFQ-HTTP', 'item' => $input, 'quantity' => '3.5', 'needed_on' => $day,
+    'request_key' => 'http-rfq-' . $tag], $csrf);
+same(201, $rfq['status'], 'Buyer can open an RFQ through HTTP');
+$rfqId = $rfq['body']['request_id'];
+$quote = $client->post('record-quote', ['id' => $rfqId, 'supplier' => $supplier, 'number' => 'QUOTE-HTTP',
+    'unit_price' => '1.25', 'available_on' => $day, 'valid_until' => $day, 'request_key' => 'http-quote-' . $tag], $csrf);
+same(201, $quote['status'], 'Quote form creates a supplier response');
+$quoteId = $quote['body']['quote_id'];
+same($quoteId, $client->post('award-rfq', ['id' => $rfqId, 'quote_id' => $quoteId, 'decision_on' => $day], $csrf)['body']['quote_id'],
+    'Award selects the recorded quote');
+$purchase = $client->post('create-purchase', ['number' => 'PO-HTTP', 'supplier' => $supplier, 'ordered_on' => $day,
+    'request_key' => 'http-po-' . $tag, 'lines' => [
+        ['item' => $input, 'uom' => 'ea', 'quantity' => '3.5', 'unit_price' => '1.25', 'due_on' => $day, 'quote_id' => $quoteId],
+    ]], $csrf);
+same(201, $purchase['status'], 'Buyer creates a purchase order against an accepted quote');
+$orderId = $purchase['body']['order_id'];
+$line = $purchase['body']['line_ids'][0];
+same('issued', $client->post('issue-purchase', ['id' => $orderId], $csrf)['body']['state'], 'Purchase is issued from the workbench');
+$purchaseScreen = $client->get('/?page=purchases&id=' . $orderId, false);
+same(true, str_contains($purchaseScreen['body'], 'name="lines[0][line_id]"'), 'Purchase receipt form renders repeatable batch controls');
+same(true, str_contains($purchaseScreen['body'], 'QA-RAW · 待收 3.5 ea'), 'Receipt can pick the item by name and remaining amount');
+$receiptData = ['id' => $orderId, 'number' => 'RC-HTTP', 'received_on' => $day, 'request_key' => 'http-rc-' . $tag, 'lines' => [
+    0 => ['line_id' => $line, 'lot' => 'HTTP-LOT-A', 'location' => $raw, 'quantity' => '1.125'],
+    2 => ['line_id' => $line, 'lot' => 'HTTP-LOT-B', 'location' => $raw, 'quantity' => '2.375'],
+]];
+$form = $client->submit('receive-purchase', $receiptData, $csrf);
+same(303, $form['status'], 'Browser form posts two batches with a deleted middle row');
+$receiptReplay = [...$receiptData, 'lines' => array_values($receiptData['lines'])];
+$postedReceipt = $client->post('receive-purchase', $receiptReplay, $csrf);
+same(201, $postedReceipt['status'], 'Repeating the same request after final receipt returns the stored result');
+$receiptId = $postedReceipt['body']['receipt_id'];
+same('/?page=inbound&id=' . $receiptId, $form['headers']['location'], 'Browser lands on the original receipt');
+same($receiptId, $client->get('/?page=receipt&operation=purchase.receive&request_key=' . $receiptData['request_key'])['body']['result']['receipt_id'],
+    'Lost response is recoverable by receipt key');
+$receivedLines = $client->get('/?page=inbound&id=' . $receiptId)['body']['tables'][0]['rows'];
+same([1125, 2375], array_column($receivedLines, 'pending_milli'), 'Each confirmed batch has its own pending inspection');
+$inspectId = $receivedLines[0]['inspection_id'];
+$qcInput = ['id' => $inspectId, 'version' => 1, 'accepted' => '1', 'rejected' => '0', 'measured_on' => $day,
+    'reason' => 'Initial incoming sample released.', 'request_key' => 'http-qc-' . $tag];
+$firstQC = $client->post('decide-inspection', $qcInput, $csrf);
+same(201, $firstQC['status'], 'QC can approve whole and decimal quantities over HTTP');
+same(125, $firstQC['body']['pending_milli'], 'Partial release retains the exact fractional balance');
+same($firstQC['body']['decision_id'], $client->post('decide-inspection', $qcInput, $csrf)['body']['decision_id'],
+    'Resubmitting the decision preserves its previous version and movement IDs');
+same(409, $client->post('decide-inspection', [...$qcInput, 'request_key' => 'http-stale-' . $tag], $csrf)['status'],
+    'A second actor with a stale inspection version cannot overwrite the first decision');
+$finalQC = $client->post('decide-inspection', [...$qcInput, 'version' => 2, 'accepted' => '0', 'rejected' => '0.125',
+    'request_key' => 'http-qc-final-' . $tag], $csrf);
+same('completed', $finalQC['body']['state'], 'Latest version disposes of the remaining quantity');
+
 $closed = (new FiscalClose($db, $scope))->close($day);
 same($closed['digest'], $client->get('/?page=finance&period=' . $day)['body']['details']['快照摘要'], 'Financial workspace renders the persisted snapshot digest');
 
@@ -210,6 +267,9 @@ same(403, $warehouse->post('calculate-plan', $posted, $whSignIn['body']['csrf'])
 same(403, $warehouse->get('/?page=jobs&id=' . $jobId)['status'], 'Warehouse role cannot read MRP task output');
 same(403, $warehouse->get('/?page=payables&id=' . $stock['payable_id'])['status'], 'Warehouse role cannot read an AP document');
 same(403, $warehouse->get('/?page=export&kind=journals', false)['status'], 'Warehouse role cannot export journal entries');
+same(403, $warehouse->post('decide-inspection', $qcInput, $whSignIn['body']['csrf'])['status'], 'Warehouse role cannot release an inspection');
+same(404, $warehouse->get('/?page=receipt&operation=purchase.receive&request_key=' . $receiptData['request_key'])['status'],
+    'Warehouse role cannot obtain another operator’s receipt by key');
 same(true, str_contains($warehouse->get('/', false)['body'], '&lt;Warehouse operator&gt;'), 'Workspace escapes operator names');
 
 $other = new WebTestClient($base);

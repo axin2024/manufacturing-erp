@@ -77,23 +77,25 @@ use ManufacturingErp\WebView;
                     <?php endforeach; ?>
                     <?php if ($form['hint'] !== ''): ?><p class="note"><?= WebView::e($form['hint']) ?></p><?php endif; ?>
                     <?php foreach ($form['fields'] as $field): ?>
-                        <label>
-                            <?= WebView::e($field['label']) ?>
-                            <?php if ($field['type'] === 'select'): ?>
-                                <select name="<?= WebView::e($field['name']) ?>" required>
-                                    <?php foreach ($field['options'] as $key => $label): ?>
-                                        <option value="<?= WebView::e($key) ?>"><?= WebView::e($label) ?></option>
+                        <?php if ($field['type'] === 'rows'): ?>
+                            <?php $group = $field; ?>
+                            <div class="line-group" data-line-group>
+                                <fieldset class="document-line" data-line>
+                                    <legend><?= WebView::e($group['label']) ?></legend>
+                                    <?php foreach ($group['fields'] as $field): ?>
+                                        <?php $fieldName = $group['name'] . '[0][' . $field['name'] . ']'; ?>
+                                        <?php require __DIR__ . '/field.php'; ?>
                                     <?php endforeach; ?>
-                                </select>
-                            <?php elseif ($field['type'] === 'textarea'): ?>
-                                <textarea name="<?= WebView::e($field['name']) ?>" rows="6" required placeholder="<?= WebView::e($field['placeholder'] ?? '') ?>"><?= WebView::e($field['value'] ?? '') ?></textarea>
-                            <?php else: ?>
-                                <input name="<?= WebView::e($field['name']) ?>" type="<?= WebView::e($field['type']) ?>"
-                                       value="<?= WebView::e($field['value'] ?? '') ?>" required>
-                            <?php endif; ?>
-                        </label>
+                                    <button class="quiet" type="button" data-remove-line hidden>删除此行</button>
+                                </fieldset>
+                                <button class="quiet" type="button" data-add-line hidden>添加一行</button>
+                            </div>
+                        <?php else: ?>
+                            <?php $fieldName = $field['name']; ?>
+                            <?php require __DIR__ . '/field.php'; ?>
+                        <?php endif; ?>
                     <?php endforeach; ?>
-                    <button class="primary" type="submit">确认<?= WebView::e($form['title']) ?></button>
+                    <button class="primary" type="submit">提交</button>
                 </form>
             </details>
         <?php endforeach; ?>

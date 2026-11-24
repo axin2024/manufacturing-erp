@@ -26,7 +26,24 @@ final class OperationsWorkspace extends WorkspaceScreen
         $purchasing = new Purchasing($this->db, $this->scope);
         if ($id === null) {
             $links = $this->scope->can('buyer', 'planner') ? [$this->link('供应商询报价', 'sourcing')] : [];
-            return ['title' => '采购订单', 'links' => $links, 'tables' => [
+            $forms = [];
+            if ($this->scope->can('buyer')) {
+                $forms[] = $this->requestForm('新建采购订单', 'create-purchase', [
+                    $this->field('number', '采购单号', 'text', ['maxlength' => 40]),
+                    $this->field('supplier', '供应商', 'select', ['options' => $this->parties('supplier')]),
+                    $this->dateField('ordered_on', '采购日期'),
+                    $this->field('lines', '采购行', 'rows', ['fields' => [
+                        $this->field('item', '物料', 'select', ['options' => $this->items()]),
+                        $this->field('uom', '采购单位', 'text', ['maxlength' => 24]),
+                        $this->quantityField('quantity', '采购数量'),
+                        $this->field('unit_price', '基础单位单价', 'number', ['min' => '0', 'step' => '0.01']),
+                        $this->dateField('due_on', '预计到货'),
+                        $this->field('proposal_id', '计划建议号（选填）', 'number', ['min' => 1, 'required' => false]),
+                        $this->field('quote_id', '中选报价号（选填）', 'number', ['min' => 1, 'required' => false]),
+                    ]]),
+                ]);
+            }
+            return ['title' => '采购订单', 'links' => $links, 'forms' => $forms, 'tables' => [
                 $this->listTable('采购订单', ['number' => '采购单号', 'supplier' => '供应商', 'ordered_on' => '单据日期',
                     'state' => '状态', 'issued_at' => '下单时间'], $purchasing->orders($before), 'purchases', 'number'),
             ]];
@@ -34,6 +51,7 @@ final class OperationsWorkspace extends WorkspaceScreen
         $order = $purchasing->order($id);
         $receiptLinks = $this->scope->can('buyer', 'warehouse', 'finance') ? 'inbound' : null;
         return ['title' => $order['number'], 'parent' => ['purchases', '采购订单'],
+            'forms' => $this->purchaseForms($order),
             'details' => ['供应商' => $order['supplier'], '状态' => WebView::state($order['state']), '单据日期' => $order['ordered_on']],
             'tables' => [
                 $this->table('采购行', ['id' => '采购行号', 'code' => '物料', 'source_qty_milli' => '采购数量', 'source_uom' => '采购单位',
@@ -41,6 +59,39 @@ final class OperationsWorkspace extends WorkspaceScreen
                     'cancelled_milli' => '已止单', 'due_on' => '交期', 'proposal_id' => '计划建议号', 'quote_id' => '报价号'], $order['lines']),
                 $this->table('收货单', ['number' => '收货单号', 'received_on' => '收货日期'], $order['receipts'], $receiptLinks, 'number'),
             ]];
+    }
+
+    private function purchaseForms(array $order): array
+    {
+        $forms = [];
+        $hidden = ['id' => $order['id']];
+        if ($this->scope->can('buyer') && $order['state'] === 'draft') {
+            $forms[] = $this->form('下达采购订单', 'issue-purchase', [], $hidden, '下达后的未收货数量将纳入物料计划。');
+        }
+        if ($this->scope->can('buyer') && !in_array($order['state'], ['closed','void'], true)) {
+            $forms[] = $this->form('结束采购订单', 'stop-purchase', [$this->field('reason', '结单原因')], $hidden,
+                '终止剩余交货，已过账收货可继续检验和匹配发票。');
+        }
+        if ($this->scope->can('warehouse') && $order['state'] === 'issued') {
+            $options = [];
+            foreach ($order['lines'] as $row) {
+                $remaining = (int) $row['qty_milli'] - (int) $row['received_milli'] - (int) $row['cancelled_milli'];
+                if ($remaining > 0) {
+                    $options[$row['id']] = $row['code'] . ' · 待收 ' . WebView::scaled($remaining, 3) . ' ' . $row['base_uom'];
+                }
+            }
+            $forms[] = $this->requestForm('登记收货批次', 'receive-purchase', [
+                $this->field('number', '收货单号', 'text', ['maxlength' => 40]),
+                $this->dateField('received_on', '收货日期'),
+                $this->field('lines', '收货批次', 'rows', ['fields' => [
+                    $this->field('line_id', '采购行', 'select', ['options' => $options]),
+                    $this->field('lot', '批号', 'text', ['maxlength' => 40]),
+                    $this->field('location', '收货库位', 'select', ['options' => $this->locations()]),
+                    $this->quantityField('quantity', '实收数量（基础单位）'),
+                ]]),
+            ], $hidden, '同一采购行可以拆成多个批次，每个批次独立生成检验单。');
+        }
+        return $forms;
     }
 
     private function sourcing(?int $id, int $before): array
@@ -52,13 +103,36 @@ final class OperationsWorkspace extends WorkspaceScreen
                 $request['state'] = $request['winning_quote_id'] === null ? 'open' : 'awarded';
             }
             unset($request);
-            return ['title' => '供应商询报价', 'parent' => ['purchases', '采购订单'], 'tables' => [
+            $forms = $this->scope->can('buyer') ? [$this->requestForm('新建供应商询价', 'create-rfq', [
+                $this->field('number', '询价单号', 'text', ['maxlength' => 40]),
+                $this->field('item', '询价物料', 'select', ['options' => $this->items()]),
+                $this->quantityField('quantity', '询价数量'),
+                $this->dateField('needed_on', '需用日期'),
+                $this->field('proposal_id', '计划建议号（选填）', 'number', ['min' => 1, 'required' => false]),
+            ])] : [];
+            return ['title' => '供应商询报价', 'parent' => ['purchases', '采购订单'], 'forms' => $forms, 'tables' => [
                 $this->listTable('询价单', ['number' => '询价单号', 'code' => '物料', 'qty_milli' => '询价数量',
                     'needed_on' => '需用日', 'state' => '状态', 'proposal_id' => '计划建议号'], $requests, 'sourcing', 'number'),
             ]];
         }
         $record = $service->details($id);
+        $forms = [];
+        if ($this->scope->can('buyer') && $record['winning_quote_id'] === null) {
+            $forms[] = $this->requestForm('登记供应商报价', 'record-quote', [
+                $this->field('supplier', '供应商', 'select', ['options' => $this->parties('supplier')]),
+                $this->field('number', '报价单号', 'text', ['maxlength' => 40]),
+                $this->field('unit_price', '基础单位单价', 'number', ['min' => '0', 'step' => '0.01']),
+                $this->dateField('available_on', '可用日期'), $this->dateField('valid_until', '报价有效期'),
+            ], ['id' => $id]);
+            if ($record['quotes'] !== []) {
+                $forms[] = $this->form('确认中选报价', 'award-rfq', [
+                    $this->field('quote_id', '供应商报价', 'select', ['options' => $this->options($record['quotes'], 'number', 'supplier_name')]),
+                    $this->dateField('decision_on', '定标日期'),
+                ], ['id' => $id]);
+            }
+        }
         return ['title' => $record['number'], 'parent' => ['sourcing', '供应商询报价'],
+            'forms' => $forms,
             'details' => ['需用日' => $record['needed_on'], '询价数量' => WebView::scaled($record['qty_milli'], 3),
                 '状态' => WebView::state($record['winning_quote_id'] === null ? 'open' : 'awarded'), '中选报价号' => $record['winning_quote_id']],
             'tables' => [$this->table('供应商报价', ['id' => '报价号', 'number' => '报价单号', 'supplier_name' => '供应商',
@@ -240,7 +314,18 @@ final class OperationsWorkspace extends WorkspaceScreen
         }
         $record = $quality->details($id);
         $decisions = $this->scopeLinks($record['decisions'], 'rework_order_id', 'work');
+        $forms = [];
+        if ($this->scope->can('quality') && $record['state'] !== 'completed') {
+            $quantities = [$this->quantityField('accepted', '放行数量', true), $this->quantityField('rejected', '拒收数量', true)];
+            if ($record['source_kind'] !== 'purchase') {
+                $quantities[] = $this->quantityField('rework', '返工数量', true);
+            }
+            $forms[] = $this->requestForm('提交检验判定', 'decide-inspection', [
+                ...$quantities, $this->dateField('measured_on', '检验日期'), $this->field('reason', '检验依据'),
+            ], ['id' => $id, 'version' => $record['version']], '可分批判定。每次提交须核对当期版本和剩余待检数量。');
+        }
         return ['title' => '检验单 #' . $id, 'parent' => ['quality', '质量检验'],
+            'forms' => $forms,
             'links' => [$this->link('批次与库存流水', 'inventory', (int) $record['lot_id'])],
             'details' => ['批号' => $record['lot_code'], '物料' => $record['item_name'], '状态' => WebView::state($record['state']),
                 '当前版本' => $record['version'], '待检' => WebView::scaled($record['pending_milli'], 3),
