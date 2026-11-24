@@ -97,13 +97,7 @@ final class Completion extends Service
             $summary[$row['material_id']] = ($summary[$row['material_id']] ?? 0) + $quantity;
             $total += $cost;
         }
-        $materials = $this->db->rows('SELECT m.*,i.code FROM work_materials m JOIN items i ON i.id=m.item_id
-            WHERE m.org_id=? AND m.work_id=?', [$org, $work]);
-        foreach ($materials as $line) {
-            $prior = $before === 0 ? 0 : ProductEngineering::componentRequirement($before, $line);
-            $required = ProductEngineering::componentRequirement($after, $line) - $prior;
-            Value::assert(($summary[$line['id']] ?? 0) >= $required, '还须登记物料 ' . $line['code'] . ' 的实际投入批次。', 409);
-        }
+        (new WorkOrderLedger($this->db, $this->scope))->checkConsumption($work, $before, $after, $summary);
         return [$inputs, $total];
     }
 

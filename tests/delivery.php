@@ -15,6 +15,7 @@ use ManufacturingErp\Sales;
 use ManufacturingErp\Scheduling;
 use ManufacturingErp\Shipping;
 use ManufacturingErp\WorkCosts;
+use ManufacturingErp\WorkClosing;
 use ManufacturingErp\WorkMaterials;
 use ManufacturingErp\WorkOrders;
 
@@ -39,6 +40,7 @@ $quality = new Inspection($db, $scope);
 $shipping = new Shipping($db, $scope);
 $genealogy = new Genealogy($db, $scope);
 $costs = new WorkCosts($db, $scope);
+$closing = new WorkClosing($db, $scope);
 
 $day = '2032-04-01';
 $next = '2032-04-02';
@@ -79,6 +81,8 @@ $work->release($order);
 $sub = $issues->authorize('sub-10', $mat, 'substitute', $replacement, 10_000, 'Qualified substitute for ten pieces')['authorization_id'];
 $a = $issues->issue('issue-190', $mat, $lot1, $materials, 190_000, $day);
 $b = $issues->issue('issue-10', $mat, $lot2, $materials, 10_000, $day, $sub);
+$overage = $issues->authorize('extra', $mat, 'overage', $item, 1000, 'Spare input')['authorization_id'];
+$spare = $issues->issue('issue-spare', $mat, $lot1, $materials, 1000, $day, null, $overage);
 $inputProof = [['issue_id' => $a['issue_id'], 'quantity' => 190_000], ['issue_id' => $b['issue_id'], 'quantity' => 10_000]];
 rejects(409, fn() => $completion->report('fin-100', $order, $fg, 'DEVICE-100', 100_000, $day, $inputProof),
     'Completion awaits confirmed actual operations');
@@ -93,7 +97,12 @@ same(244_500, $output['actual_minor'], 'Finished cost includes both lots, labor 
 same(240_000, $output['standard_minor'], 'Manufacturing standard stays frozen');
 same($output['output_id'], $completion->report('fin-100', $order, $fg, 'DEVICE-100', 100_000, $day, array_reverse($inputProof))['output_id'],
     'Identical completion input confirmations replay deterministically');
-same(0, $costs->report($order)['wip_minor'], 'All actual WIP cost was capitalized');
+same(1200, $costs->report($order)['wip_minor'], 'Unassigned input cost stays in WIP');
+$blocked = $closing->close($order, $day);
+same(['pending_inspection', 'unreturned_material', 'open_wip'], array_column($blocked['blockers'], 'kind'),
+    'Work close gives separate actionable reasons for pending inspection, unused material and WIP');
+$issues->returnToStock('return-spare', $spare['issue_id'], $materials, 1000, $day);
+same(0, $costs->report($order)['wip_minor'], 'Returning the unused input clears WIP');
 $byCategory = array_column($costs->report($order)['summary'], 'variance_minor', 'element');
 same(2000, (int) $byCategory['material'], 'CNY 20 in material differences can be reconciled independently');
 $entries = $costs->report($order)['entries'];
@@ -107,6 +116,8 @@ rejects(409, fn() => $shipping->reserve('pending', $demand, $finishedLot, $fg, 1
 $pass = $quality->decide('qc-98', $output['inspection_id'], 1, 98_000, 0, 2000, $next, 'Pass 98, reseat pins on two devices');
 same('completed', $pass['state'], 'The initial inspection has a result for all 100 units');
 $child = $pass['rework_order_id'];
+rejects(409, fn() => $closing->close($order, $day), 'Cannot close before the inspection date');
+same('closed', $closing->close($order, $next)['state'], 'The parent can close after QC and return, while the child tracks its own remaining work');
 same($order, (int) $work->details($child)['parent_work_id'], 'Rework is an independent child of the production order');
 same('rework', $work->details($child)['kind'], 'Two units have their own rework route');
 same($child, $quality->decide('qc-98', $output['inspection_id'], 1, 98_000, 0, 2000, $next, 'Pass 98, reseat pins on two devices')['rework_order_id'],
@@ -140,6 +151,7 @@ $execution->report('actual-rework', $reworkOp, $next . ' 09:00:00', $next . ' 09
 $madeAgain = $completion->report('fin-rework', $child, $fg, 'DEVICE-REWORK-2', 2000, $next, []);
 same(4890, $madeAgain['actual_minor'], 'Rework carries forward the two units of original lot cost');
 $quality->decide('qc-rw', $madeAgain['inspection_id'], 1, 2000, 0, 0, $later, 'Rework accepted');
+same('closed', $closing->close($child, $later)['state'], 'The rework order settles its own costs and inspection');
 $remaining = $shipping->reserve('reserve-2', $secondDemand, $madeAgain['lot_id'], $fg, 2000)['reservation_id'];
 $shipping->dispatch('ship-2', 'SHP-2', $customer, $later, [['reservation_id' => $remaining, 'quantity' => 2000]]);
 same('completed', $sales->order($sale['order_id'])['state'], 'Both sales splits are eventually shipped');

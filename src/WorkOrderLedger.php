@@ -45,4 +45,44 @@ final class WorkOrderLedger extends Service
     {
         (new PlanningCommitments($this->db, $this->scope))->supply('work', (int) $work['id'], (int) $work['item_id'], $work['due_on'], $remaining);
     }
+
+    public function checkConsumption(int $work, int $before, int $after, array $summary): void
+    {
+        $materials = $this->db->rows('SELECT m.*,i.code FROM work_materials m JOIN items i ON i.id=m.item_id
+            WHERE m.org_id=? AND m.work_id=?', [$this->scope->org, $work]);
+        foreach ($materials as $line) {
+            $prior = $before === 0 ? 0 : ProductEngineering::componentRequirement($before, $line);
+            $required = ProductEngineering::componentRequirement($after, $line) - $prior;
+            Value::assert(($summary[$line['id']] ?? 0) >= $required, '还须登记物料 ' . $line['code'] . ' 的实际投入批次。', 409);
+        }
+    }
+
+    public function applyIssueApprovals(array $line, int $useItem, int $quantity, ?int $substitute, ?int $overage): int
+    {
+        $id = (int) $line['id'];
+        if ($useItem !== (int) $line['item_id']) {
+            $this->useApproval($id, $useItem, 'substitute', $substitute, $quantity);
+        } else {
+            Value::assert($substitute === null, '标准物料无需使用替代审批。');
+        }
+        $issued = (int) $line['issued_milli'] - (int) $line['returned_milli'];
+        $plan = (int) $line['plan_milli'];
+        $extra = max(0, $issued + $quantity - $plan) - max(0, $issued - $plan);
+        if ($extra > 0) {
+            $this->useApproval($id, $useItem, 'overage', $overage, $extra);
+        } else {
+            Value::assert($overage === null, '本笔领料未超出计划。');
+        }
+        return $issued + $quantity;
+    }
+
+    private function useApproval(int $material, int $item, string $kind, ?int $id, int $quantity): void
+    {
+        $error = $kind === 'overage' ? '超出计划的用量须补充批准。' : '替代料须先获批准。';
+        Value::assert($id !== null, $error, 409);
+        $result = $this->db->run('UPDATE work_issue_authorizations SET used_milli=used_milli+?
+            WHERE org_id=? AND id=? AND material_id=? AND kind=? AND use_item_id=? AND qty_milli-used_milli>=?',
+            [$quantity, $this->scope->org, $id, $material, $kind, $item, $quantity]);
+        Value::assert($result->rowCount() === 1, $error, 409);
+    }
 }

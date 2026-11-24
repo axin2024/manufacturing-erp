@@ -28,6 +28,9 @@ final class WorkOutputLedger extends Service
         $state = $remaining === 0 ? 'waiting_quality' : 'active';
         $this->db->run('UPDATE work_orders SET produced_milli=?,state=? WHERE org_id=? AND id=?', [$after, $state, $org, $workId]);
         $ledger->updateSupply($work, $remaining);
+        if ($remaining === 0) {
+            $this->db->run('UPDATE planning_work_needs SET remaining_milli=0 WHERE org_id=? AND work_id=?', [$org, $workId]);
+        }
         $result = ['output_id' => $id, 'work_id' => $workId, 'inspection_id' => $inspection, 'cost_id' => $cost,
             'work_state' => $state, 'actual_minor' => $actual, 'standard_minor' => $standard, ...$lot];
         $this->audit('work.output_reported', $id, $result);

@@ -37,7 +37,7 @@ final class WorkOrders extends Service
                     (org_id,number,kind,item_id,proposal_id,bom_id,route_id,qty_milli,standard_unit_cost_minor,engineering_on,starts_on,due_on,created_by)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [$org, $number, $kind, $item, $proposalId, $bom['id'], $route['id'] ?? null,
                         $quantity, $record['standard_cost_minor'], $engineeringOn, $startsOn, $dueOn, $this->scope->user]);
-                $this->snapshotEngineering($org, $work, $quantity, $bom, $route);
+                $this->snapshotEngineering($org, $work, $quantity, $bom, $kind === 'subcontract' ? null : $route);
                 $this->audit('work.created', $work, ['number' => $number, 'bom_id' => $bom['id'], 'route_id' => $route['id'] ?? null,
                     'proposal_id' => $proposalId]);
                 return ['work_id' => $work, 'state' => 'draft'];
@@ -66,6 +66,10 @@ final class WorkOrders extends Service
                 return ['work_id' => $id, 'state' => 'released'];
             }
             Value::assert($work['state'] === 'approved', '只有已审核工单可以下达。', 409);
+            if ($work['kind'] === 'subcontract') {
+                Value::assert($this->db->row('SELECT id FROM subcontract_orders WHERE org_id=? AND work_id=?', [$org, $id]) !== null,
+                    '委外工单须先确定加工方和合同加工费。', 409);
+            }
             $unscheduled = $this->db->row('SELECT p.id FROM work_operations p LEFT JOIN operation_slots s
                 ON s.org_id=p.org_id AND s.operation_id=p.id AND s.active=1 WHERE p.org_id=? AND p.work_id=? AND s.id IS NULL LIMIT 1',
                 [$org, $id]);
