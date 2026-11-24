@@ -22,6 +22,16 @@ final class Inspection extends Service
                 Value::assert($rework === 0 || $case['source_kind'] !== 'purchase', '来料检验只支持放行或拒收。', 409);
                 $left = (int) $case['pending_milli'] - $total;
                 Value::assert($left >= 0 && $case['state'] !== 'completed', '判定数量超过检验单待检数量。', 409);
+                $rule = $case['rule_version'] ?? Extensions::QUALITY_DEFAULT;
+                if ($rule !== Extensions::QUALITY_DEFAULT) {
+                    Extensions::load()->checkDecision($rule, [
+                        'case_id' => $id, 'org_id' => $org, 'source_kind' => $case['source_kind'], 'item_code' => $case['code'],
+                        'lot_code' => $case['lot_code'], 'pending_milli' => (int) $case['pending_milli'], 'version' => $version,
+                    ], [
+                        'accepted_milli' => $accepted, 'rejected_milli' => $rejected, 'rework_milli' => $rework,
+                        'measured_on' => $date, 'reason' => $reason,
+                    ]);
+                }
                 $decision = $this->db->insert('INSERT INTO inspection_decisions
                     (org_id,case_id,version,accepted_milli,rejected_milli,rework_milli,reason,measured_on,actor_id) VALUES (?,?,?,?,?,?,?,?,?)',
                     [$org, $id, $version, $accepted, $rejected, $rework, $reason, $date, $this->scope->user]);
@@ -41,7 +51,7 @@ final class Inspection extends Service
                     [$accepted, $rejected, $rework, $state, $org, $id]);
                 $result = ['inspection_id' => $id, 'decision_id' => $decision, 'version' => $version + 1, 'state' => $state,
                     'pending_milli' => $left, 'movement_ids' => $movements, 'rework_order_id' => $child];
-                $this->audit('quality.decided', $id, $result);
+                $this->audit('quality.decided', $id, $result + ['rule_version' => $rule]);
                 return $result;
             }), 'quality');
     }
@@ -68,9 +78,10 @@ final class Inspection extends Service
 
     private function caseRecord(int $id): array
     {
-        $row = $this->db->row('SELECT c.*,l.lot_code,i.code,i.name AS item_name,w.code AS location_code,
+        $row = $this->db->row('SELECT c.*,v.rule_version,l.lot_code,i.code,i.name AS item_name,w.code AS location_code,
             c.qty_milli-c.accepted_milli-c.rejected_milli-c.rework_milli AS pending_milli FROM inspection_cases c
             JOIN stock_lots l ON l.id=c.lot_id JOIN items i ON i.id=l.item_id JOIN locations w ON w.id=c.location_id
+            LEFT JOIN inspection_rule_versions v ON v.org_id=c.org_id AND v.case_id=c.id
             WHERE c.org_id=? AND c.id=?', [$this->scope->org, $id]);
         Value::assert($row !== null, '检验单不存在。', 404);
         return $row;

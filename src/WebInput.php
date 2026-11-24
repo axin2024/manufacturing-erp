@@ -12,6 +12,8 @@ final class WebInput
     {
         $type = strtolower(trim(explode(';', $_SERVER['CONTENT_TYPE'] ?? '', 2)[0]));
         if ($type !== 'application/json') {
+            Value::assert(!isset($_POST['_workbench']) || ($_POST['_complete'] ?? null) === '1',
+                '表单未完整接收，请检查服务器的请求大小及字段数量限制。', 413);
             return $_POST;
         }
         $content = file_get_contents('php://input', false, null, 0, 16_777_217);

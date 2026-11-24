@@ -293,6 +293,7 @@ final class OperationsWorkspace extends WorkspaceScreen
         return ['title' => $record['number'], 'parent' => ['work', '生产工单'], 'links' => $links, 'forms' => $actions->forOrder($record, $hasContract),
             'details' => ['物料' => $record['item_code'] . ' ' . $record['item_name'], '状态' => WebView::state($record['state']),
                 '工单类型' => WebView::state($record['kind']), 'BOM 版本' => $record['bom_id'], '工艺版本' => $record['route_id'],
+                '工单人工与制造费用分摊' => $record['kind'] === 'subcontract' ? null : ($record['cost_policy_version'] ?? Extensions::ALLOCATION_DEFAULT),
                 '计划开工' => $record['starts_on'], '计划完成' => $record['due_on'], '来源建议' => $record['proposal_id']],
             'tables' => $tables];
     }
@@ -375,6 +376,7 @@ final class OperationsWorkspace extends WorkspaceScreen
             'forms' => $forms,
             'links' => [$this->link('批次与库存流水', 'inventory', (int) $record['lot_id'])],
             'details' => ['批号' => $record['lot_code'], '物料' => $record['item_name'], '状态' => WebView::state($record['state']),
+                '质检规则版本' => $record['rule_version'] ?? Extensions::QUALITY_DEFAULT,
                 '当前版本' => $record['version'], '待检' => WebView::scaled($record['pending_milli'], 3),
                 '合格' => WebView::scaled($record['accepted_milli'], 3), '拒收' => WebView::scaled($record['rejected_milli'], 3),
                 '返工' => WebView::scaled($record['rework_milli'], 3)],

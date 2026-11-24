@@ -8,9 +8,11 @@ final class WorkOrderLedger extends Service
 {
     public function order(int $id): array
     {
-        $row = $this->db->row('SELECT w.*,i.code AS item_code,i.name AS item_name,i.base_uom,r.sales_demand_id
+        $row = $this->db->row('SELECT w.*,i.code AS item_code,i.name AS item_name,i.base_uom,r.sales_demand_id,
+            c.policy_version AS cost_policy_version,c.applied_minor AS support_applied_minor
             FROM work_orders w JOIN items i ON i.id=w.item_id LEFT JOIN mrp_proposals p ON p.id=w.proposal_id
             LEFT JOIN mrp_requirements r ON r.run_id=p.run_id AND r.ref=p.requirement_ref
+            LEFT JOIN work_cost_policies c ON c.org_id=w.org_id AND c.work_id=w.id
             WHERE w.org_id=? AND w.id=?', [$this->scope->org, $id]);
         Value::assert($row !== null, '生产工单不存在。', 404);
         return $row;

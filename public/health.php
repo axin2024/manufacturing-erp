@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use ManufacturingErp\Database;
+use ManufacturingErp\Extensions;
 use ManufacturingErp\Migrations;
 
 require dirname(__DIR__) . '/src/bootstrap.php';
@@ -17,6 +18,7 @@ if (!in_array($method, ['GET', 'HEAD'], true)) {
     exit('{"status":"method_not_allowed"}');
 }
 try {
+    Extensions::load()->validate();
     $ready = (new Migrations(Database::connect(), dirname(__DIR__) . '/database/migrations'))->ready();
 } catch (Throwable) {
     $ready = false;

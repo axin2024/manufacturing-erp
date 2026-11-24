@@ -36,8 +36,7 @@ final class Completion extends Service
                 }
                 $support = $this->db->row("SELECT COALESCE(SUM(actual_minor),0) AS amount FROM work_cost_entries
                     WHERE org_id=? AND work_id=? AND element IN ('labor','overhead')", [$org, $workId]);
-                $supportTotal = (int) $support['amount'];
-                $applied = Value::allocation($supportTotal, $after, $total) - Value::allocation($supportTotal, $before, $total);
+                $applied = (new WorkCostPolicy($this->db, $this->scope))->apply($work, (int) $support['amount'], $after);
                 $unitStandard = (int) $work['standard_unit_cost_minor'];
                 $standard = Value::extendedPrice($after, $unitStandard) - Value::extendedPrice($before, $unitStandard);
                 $result = $ledger->record($work, $location, $code, $quantity, $inputCost + $applied, $standard, $date);

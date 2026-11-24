@@ -31,9 +31,10 @@ abstract class Service
         $key = trim($key);
         Value::assert((bool) preg_match('/\A[A-Za-z0-9_.:@-]{1,100}\z/', $key), '请求标识格式无效。');
         $digest = hash('sha256', Value::json($payload));
-        $prior = $this->db->row('SELECT payload_digest,result FROM operation_receipts WHERE org_id=? AND kind=? AND request_key=?',
+        $prior = $this->db->row('SELECT actor_id,payload_digest,result FROM operation_receipts WHERE org_id=? AND kind=? AND request_key=?',
             [$this->scope->org, $kind, $key]);
         if ($prior !== null) {
+            Value::assert((int) $prior['actor_id'] === $this->scope->user, '此请求标识已被使用。', 409);
             Value::assert(hash_equals($prior['payload_digest'], $digest), '同一请求标识已用于不同的参数。', 409);
             return Value::fromJson($prior['result']);
         }

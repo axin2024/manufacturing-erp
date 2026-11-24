@@ -38,8 +38,9 @@ final class WorkOrders extends Service
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [$org, $number, $kind, $item, $proposalId, $bom['id'], $route['id'] ?? null,
                         $quantity, $record['standard_cost_minor'], $engineeringOn, $startsOn, $dueOn, $this->scope->user]);
                 $this->snapshotEngineering($org, $work, $quantity, $bom, $kind === 'subcontract' ? null : $route);
+                $policy = $kind === 'manufacture' ? (new WorkCostPolicy($this->db, $this->scope))->freeze($work) : null;
                 $this->audit('work.created', $work, ['number' => $number, 'bom_id' => $bom['id'], 'route_id' => $route['id'] ?? null,
-                    'proposal_id' => $proposalId]);
+                    'proposal_id' => $proposalId, 'cost_policy_version' => $policy]);
                 return ['work_id' => $work, 'state' => 'draft'];
             }), 'planner');
     }

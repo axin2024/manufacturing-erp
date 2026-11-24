@@ -455,6 +455,8 @@ same(403, $warehouse->get('/?page=export&kind=journals', false)['status'], 'Ware
 same(403, $warehouse->post('decide-inspection', $qcInput, $whSignIn['body']['csrf'])['status'], 'Warehouse role cannot release an inspection');
 same(404, $warehouse->get('/?page=receipt&operation=purchase.receive&request_key=' . $receiptData['request_key'])['status'],
     'Warehouse role cannot obtain another operator’s receipt by key');
+same(409, $warehouse->post('receive-purchase', $receiptReplay, $whSignIn['body']['csrf'])['status'],
+    'A request key already claimed by another operator cannot return their receipt or post again');
 same(true, str_contains($warehouse->get('/', false)['body'], '&lt;Warehouse operator&gt;'), 'Workspace escapes operator names');
 
 $other = new WebTestClient($base);
@@ -514,7 +516,9 @@ same(true, str_contains($engineeringHtml, 'name="id" value="' . $product . '"'),
 $bomData = ['item' => $product, 'effective_on' => $day, 'lines' => [
     2 => ['item' => $component, 'quantity' => '2', 'uom' => 'box', 'loss_percent' => '1.25', 'alternatives' => [$alternative]],
 ]];
-$bomPost = $planner->submit('publish-bom', $bomData, $plannerCsrf);
+same(413, $planner->submit('publish-bom', ['_workbench' => '1'] + $bomData, $plannerCsrf)['status'],
+    'A workbench form missing its final field is refused rather than posting a partial document');
+$bomPost = $planner->submit('publish-bom', ['_workbench' => '1'] + $bomData + ['_complete' => '1'], $plannerCsrf);
 same(303, $bomPost['status'], 'HTML submits a BOM with an alternative and a noncontiguous row index');
 $bomUrl = $bomPost['headers']['location'];
 $firstBom = $planner->get($bomUrl)['body'];

@@ -74,6 +74,7 @@ use ManufacturingErp\WebView;
             <details class="operation">
                 <summary><?= WebView::e($form['title']) ?></summary>
                 <form method="post" action="/?action=<?= WebView::e($form['action']) ?>">
+                    <input type="hidden" name="_workbench" value="1">
                     <input type="hidden" name="_csrf" value="<?= WebView::e($csrf) ?>">
                     <?php foreach ($form['hidden'] as $key => $value): ?>
                         <input type="hidden" name="<?= WebView::e($key) ?>" value="<?= WebView::e($value) ?>">
@@ -98,6 +99,7 @@ use ManufacturingErp\WebView;
                             <?php require __DIR__ . '/field.php'; ?>
                         <?php endif; ?>
                     <?php endforeach; ?>
+                    <input type="hidden" name="_complete" value="1">
                     <button class="primary" type="submit">提交</button>
                 </form>
             </details>

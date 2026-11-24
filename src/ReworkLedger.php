@@ -30,8 +30,9 @@ final class ReworkLedger extends Service
             $this->db->run('INSERT INTO work_operations (org_id,work_id,sequence_no,center_id,label,standard_seconds) VALUES (?,?,?,?,?,?)',
                 [$org, $id, $step['sequence_no'], $step['center_id'], $step['label'], $standard]);
         }
+        $policy = (new WorkCostPolicy($this->db, $this->scope))->freeze($id);
         $this->audit('work.rework_opened', $id, ['parent_work_id' => (int) $parent['id'], 'decision_id' => $decision,
-            'source_lot_id' => (int) $inspection['lot_id'], 'qty_milli' => $quantity]);
+            'source_lot_id' => (int) $inspection['lot_id'], 'qty_milli' => $quantity, 'cost_policy_version' => $policy]);
         return $id;
     }
 }

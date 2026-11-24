@@ -6,6 +6,7 @@ use ManufacturingErp\BusinessError;
 use ManufacturingErp\BatchWorker;
 use ManufacturingErp\Database;
 use ManufacturingErp\DemoScenario;
+use ManufacturingErp\Extensions;
 use ManufacturingErp\Identity;
 use ManufacturingErp\Migrations;
 use ManufacturingErp\Value;
@@ -36,6 +37,7 @@ try {
             echo $applied === [] ? "Schema is current.\n" : 'Applied: ' . implode(', ', $applied) . "\n";
             break;
         case 'health':
+            Extensions::load()->validate();
             if (!$migrations->ready()) {
                 throw new RuntimeException('Schema is not current.');
             }
