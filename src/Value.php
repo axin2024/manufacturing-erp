@@ -80,7 +80,15 @@ final class Value
 
     public static function extendedPrice(int $quantity, int $unitPrice): int
     {
-        return intdiv(self::quantity($quantity) * self::unitPrice($unitPrice) + 500, self::SCALE);
+        self::assert($quantity >= 0 && $quantity <= self::MAX_QUANTITY, '数量超出有效范围。');
+        return intdiv($quantity * self::unitPrice($unitPrice) + 500, self::SCALE);
+    }
+
+    public static function allocation(int $amount, int $share, int $total): int
+    {
+        self::assert($amount >= 0 && $share >= 0 && $share <= $total, '金额分摊参数无效。');
+        self::quantity($total);
+        return intdiv($amount, $total) * $share + intdiv(($amount % $total) * $share, $total);
     }
 
     public static function json(mixed $value): string

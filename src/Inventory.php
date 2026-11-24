@@ -25,7 +25,7 @@ final class Inventory extends Service
     public function move(string $key, int $lot, int $from, int $to, string $quality, int $quantity, string $date): array
     {
         Value::assert($from !== $to, '请指定不同的调出和调入库位。');
-        Value::assert($quality !== 'pending', '待检批次须留在报检库位，判定后可调拨。', 409);
+        Value::assert(!in_array($quality, ['pending', 'rework'], true), '待检及返工批次须留在工单处理指定库位。', 409);
         Value::quantity($quantity);
         Value::day($date);
         return $this->mutate(fn(): array => $this->replay('stock.transfer', $key, [$lot, $from, $to, $quality, $quantity, $date],

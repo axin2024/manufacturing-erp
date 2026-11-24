@@ -10,9 +10,10 @@ final class WorkOrders extends Service
         string $dueOn, ?int $proposalId = null): array
     {
         $number = Value::code($number, '工单号');
+        Value::assert(!str_starts_with($number, 'RW-'), 'RW- 编号用于检验生成的返工单。');
         Value::quantity($quantity);
-        Value::day($engineeringOn);
-        Value::assert(Value::day($startsOn) <= Value::day($dueOn), '工单计划开工日期不能晚于计划完成日期。');
+        Value::assert(Value::day($engineeringOn) <= Value::day($startsOn) && $startsOn <= Value::day($dueOn),
+            '工单日期须按工程基准、计划开工、计划完成排序。');
         return $this->mutate(fn(int $org): array => $this->replay('work.create', $key,
             [$number, $item, $quantity, $engineeringOn, $startsOn, $dueOn, $proposalId],
             function () use ($org, $number, $item, $quantity, $engineeringOn, $startsOn, $dueOn, $proposalId): array {
@@ -119,6 +120,7 @@ final class WorkOrders extends Service
             $work = $ledger->order($id);
             Value::assert(in_array($work['state'], ['draft', 'approved', 'released', 'active', 'paused'], true)
                 && (int) $work['produced_milli'] === 0, '已有完工或终结记录，无法撤销工单。', 409);
+            Value::assert($work['kind'] !== 'rework', '返工单关联实际待处理库存，须通过质检流程处理。', 409);
             Value::assert($work['started_at'] === null, '已开工工单须通过余料、成本和产出结案流程处理。', 409);
             $this->db->run('UPDATE operation_slots s JOIN work_operations p ON p.id=s.operation_id
                 SET s.active=0 WHERE s.org_id=? AND p.work_id=? AND s.active=1', [$org, $id]);
@@ -144,9 +146,13 @@ final class WorkOrders extends Service
         $this->requireRole('planner', 'production', 'warehouse', 'quality', 'finance', 'buyer');
         $work = (new WorkOrderLedger($this->db, $this->scope))->order($id);
         $work['materials'] = $this->materials($id);
-        $work['operations'] = $this->db->rows('SELECT p.*,s.id AS slot_id,s.starts_at,s.ends_at,m.code AS machine_code
+        $work['operations'] = $this->db->rows('SELECT p.*,s.id AS slot_id,s.starts_at,s.ends_at,m.code AS machine_code,
+            a.actual_seconds,a.starts_at AS actual_starts_at,a.ends_at AS actual_ends_at
             FROM work_operations p LEFT JOIN operation_slots s ON s.org_id=p.org_id AND s.operation_id=p.id AND s.active=1
+            LEFT JOIN operation_actuals a ON a.org_id=p.org_id AND a.operation_id=p.id
             LEFT JOIN machines m ON m.id=s.machine_id WHERE p.org_id=? AND p.work_id=? ORDER BY p.sequence_no', [$this->scope->org, $id]);
+        $work['rework_orders'] = $this->db->rows('SELECT id,number,state,qty_milli,produced_milli
+            FROM work_orders WHERE org_id=? AND parent_work_id=? ORDER BY id', [$this->scope->org, $id]);
         return $work;
     }
 

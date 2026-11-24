@@ -79,7 +79,9 @@ final class Sales extends Service
                 $this->db->run("INSERT INTO demand_dispositions (org_id,demand_id,source_kind,source_id,qty_milli,reason)
                     SELECT org_id,demand_id,source_kind,source_id,qty_milli,? FROM demand_commitments
                     WHERE org_id=? AND demand_id=? AND state IN ('committed','started','completed')", [$reason, $org, $demand]);
-                $this->db->run("UPDATE sales_demands SET state='cancelled' WHERE org_id=? AND id=?", [$org, $demand]);
+                $released = $this->db->run('UPDATE stock_reservations SET remaining_milli=0 WHERE org_id=? AND demand_id=? AND remaining_milli>0',
+                    [$org, $demand])->rowCount();
+                $this->db->run("UPDATE sales_demands SET state='cancelled',allocated_milli=dispatched_milli WHERE org_id=? AND id=?", [$org, $demand]);
                 $other = $this->db->row("SELECT d.id FROM sales_demands d JOIN sales_lines l ON l.id=d.line_id
                     WHERE d.org_id=? AND l.order_id=? AND d.state IN ('draft','released') LIMIT 1", [$org, $row['order_id']]);
                 if ($other === null) {
@@ -88,7 +90,8 @@ final class Sales extends Service
                     $this->db->run('UPDATE sales_orders SET state=? WHERE org_id=? AND id=?',
                         [$hasDelivery ? 'completed' : 'cancelled', $org, $row['order_id']]);
                 }
-                $this->audit('sales.demand_cancelled', $demand, ['reason' => $reason, 'dispatched_milli' => (int) $row['dispatched_milli']]);
+                $this->audit('sales.demand_cancelled', $demand, ['reason' => $reason,
+                    'dispatched_milli' => (int) $row['dispatched_milli'], 'released_reservations' => $released]);
             }
             return $this->db->rows('SELECT id,source_kind,source_id,qty_milli,reason,state FROM demand_dispositions
                 WHERE org_id=? AND demand_id=? ORDER BY id', [$org, $demand]);

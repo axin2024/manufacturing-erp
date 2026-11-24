@@ -19,7 +19,7 @@ final class Inspection extends Service
             function () use ($org, $id, $version, $accepted, $rejected, $rework, $total, $date, $reason): array {
                 $case = $this->caseRecord($id);
                 Value::assert((int) $case['version'] === $version, '检验单已经更新，请使用当前版本。', 409);
-                Value::assert($rework === 0, '此检验单不支持转内部返工，请判定合格或拒收。', 409);
+                Value::assert($rework === 0 || $case['source_kind'] !== 'purchase', '来料检验只支持放行或拒收。', 409);
                 $left = (int) $case['pending_milli'] - $total;
                 Value::assert($left >= 0 && $case['state'] !== 'completed', '判定数量超过检验单待检数量。', 409);
                 $decision = $this->db->insert('INSERT INTO inspection_decisions
@@ -34,12 +34,13 @@ final class Inspection extends Service
                         $movements[$quality] = $stock->post($lot, $location, $quality, $quantity, $date, 'inspection', $decision);
                     }
                 }
+                $child = $rework === 0 ? null : (new ReworkLedger($this->db, $this->scope))->open($case, $decision, $rework, $date);
                 $state = $left === 0 ? 'completed' : 'partial';
                 $this->db->run('UPDATE inspection_cases SET accepted_milli=accepted_milli+?,rejected_milli=rejected_milli+?,
                     rework_milli=rework_milli+?,state=?,version=version+1 WHERE org_id=? AND id=?',
                     [$accepted, $rejected, $rework, $state, $org, $id]);
                 $result = ['inspection_id' => $id, 'decision_id' => $decision, 'version' => $version + 1, 'state' => $state,
-                    'pending_milli' => $left, 'movement_ids' => $movements];
+                    'pending_milli' => $left, 'movement_ids' => $movements, 'rework_order_id' => $child];
                 $this->audit('quality.decided', $id, $result);
                 return $result;
             }), 'quality');
@@ -49,7 +50,9 @@ final class Inspection extends Service
     {
         $this->requireRole('quality', 'warehouse', 'production', 'buyer', 'finance');
         $result = $this->caseRecord($id);
-        $result['decisions'] = $this->db->rows('SELECT d.*,u.name AS actor FROM inspection_decisions d JOIN users u ON u.id=d.actor_id
+        $result['decisions'] = $this->db->rows('SELECT d.*,u.name AS actor,w.id AS rework_order_id
+            FROM inspection_decisions d JOIN users u ON u.id=d.actor_id
+            LEFT JOIN work_orders w ON w.rework_decision_id=d.id AND w.org_id=d.org_id
             WHERE d.org_id=? AND d.case_id=? ORDER BY d.version', [$this->scope->org, $id]);
         return $result;
     }

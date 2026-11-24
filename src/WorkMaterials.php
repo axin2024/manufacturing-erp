@@ -104,8 +104,9 @@ final class WorkMaterials extends Service
                     VALUES (?,?,?,?,?,?)', [$org, $issue, $location, $quantity, $day, $this->scope->user]);
                 $movement = (new StockLedger($this->db, $this->scope))->post((int) $prior['lot_id'], $location, 'available', $quantity,
                     $day, 'work_return', $id);
-                $actual = $this->returnedAmount($received, $quantity, (int) $prior['unit_cost_minor']);
-                $standard = $this->returnedAmount($received, $quantity, (int) $material['standard_unit_cost_minor']);
+                $unreturned = (int) $prior['qty_milli'] - $received;
+                $actual = $this->returnedAmount($unreturned, $quantity, (int) $prior['unit_cost_minor']);
+                $standard = $this->returnedAmount($unreturned, $quantity, (int) $material['standard_unit_cost_minor']);
                 $cost = (new WorkCostLedger($this->db, $this->scope))->record($workId, 'material', 'return', $id, -$actual, -$standard, $day);
                 $this->db->run('UPDATE work_issues SET returned_milli=returned_milli+? WHERE org_id=? AND id=?', [$quantity, $org, $issue]);
                 $this->db->run('UPDATE work_materials SET returned_milli=returned_milli+? WHERE org_id=? AND id=?',
@@ -144,8 +145,8 @@ final class WorkMaterials extends Service
         Value::assert($result->rowCount() === 1, $error, 409);
     }
 
-    private function returnedAmount(int $prior, int $quantity, int $cost): int
+    private function returnedAmount(int $unreturned, int $quantity, int $cost): int
     {
-        return Value::extendedPrice($prior + $quantity, $cost) - ($prior === 0 ? 0 : Value::extendedPrice($prior, $cost));
+        return Value::extendedPrice($unreturned, $cost) - Value::extendedPrice($unreturned - $quantity, $cost);
     }
 }
