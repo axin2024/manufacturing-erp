@@ -281,6 +281,51 @@ same(201, $transfer['status'], 'Operator posts both intercompany sides');
 same(25, $transfer['body']['amount_minor'], 'Transfer uses exact carrying value');
 same($transfer['body']['destination_lot_id'], $client->post('transfer-between-organizations', $transferInput, $csrf)['body']['destination_lot_id'],
     'Intercompany retry reuses the destination inventory batch');
+
+$dock = $master->addLocation('SHIP-DOCK', 'Shipping dock');
+$customer = $master->addParty('BUYER-HTTP', 'Outbound HTTP customer', 'customer');
+$opening = $client->post('open-stock', ['item' => $input, 'location' => $raw, 'code' => 'HTTP-OUTBOUND', 'uom' => 'ea',
+    'quantity' => '5', 'unit_cost' => '1.00', 'posted_on' => $day, 'request_key' => 'open-outbound-' . $tag], $csrf);
+same(201, $opening['status'], 'Warehouse records opening balance');
+$outboundLot = $opening['body']['lot_id'];
+$moved = $client->post('move-stock', ['id' => $outboundLot, 'from' => $raw, 'to' => $dock, 'quality' => 'available',
+    'quantity' => '2', 'posted_on' => $day, 'request_key' => 'move-outbound-' . $tag], $csrf);
+same(201, $moved['status'], 'Warehouse transfers a batch to the dispatch dock');
+$sale = $client->post('create-sale', ['number' => 'SO-HTTP-OUTBOUND', 'customer' => $customer, 'request_key' => 'sale-outbound-' . $tag,
+    'deliveries' => [
+        ['line' => 1, 'item' => $input, 'unit_price' => '3.50', 'due_on' => $day, 'quantity' => '2'],
+        ['line' => 1, 'item' => $input, 'unit_price' => '3.50', 'due_on' => '2037-06-25', 'quantity' => '1'],
+    ]], $csrf);
+same(201, $sale['status'], 'Sales can split one line into two confirmed dates');
+[$firstDemand, $secondDemand] = $sale['body']['demand_ids'];
+$saleOrder = $sale['body']['order_id'];
+same([$firstDemand, $secondDemand], $client->post('freeze-sale', ['id' => $saleOrder], $csrf)['body']['demand_ids'], 'Both sales installments freeze together');
+$demandScreen = $client->get('/?page=sales&id=' . $saleOrder . '&demand=' . $firstDemand, false);
+same(true, str_contains($demandScreen['body'], 'HTTP-OUTBOUND / SHIP-DOCK · 2'), 'Worklist shows the unallocated balance by batch and bin');
+$holdInput = ['demand' => $firstDemand, 'stock_bin' => $outboundLot . ':' . $dock, 'quantity' => '1', 'request_key' => 'hold-outbound-' . $tag];
+$reserved = $client->post('reserve-stock', $holdInput, $csrf);
+same(201, $reserved['status'], 'Stock is reserved against the chosen frozen demand');
+$released = $client->post('release-reservation', ['id' => $reserved['body']['reservation_id'], 'reason' => 'Regroup physical picking',
+    'request_key' => 'release-outbound-' . $tag], $csrf);
+same(1000, $released['body']['released_milli'], 'Releasing a reservation returns the unshipped quantity');
+$reserveAgain = $client->post('reserve-stock', [...$holdInput, 'request_key' => 'hold-again-outbound-' . $tag], $csrf);
+$outboundReservation = $reserveAgain['body']['reservation_id'];
+$dispatchScreen = $client->get('/?page=shipments&customer=' . $customer, false);
+same(true, str_contains($dispatchScreen['body'], 'SO-HTTP-OUTBOUND / HTTP-OUTBOUND'), 'Shipment form shows customer-specific allocations');
+$sentInput = ['number' => 'SHIP-HTTP-OUTBOUND', 'customer' => $customer, 'dispatched_on' => $day,
+    'request_key' => 'shipped-outbound-' . $tag, 'lines' => [['reservation_id' => $outboundReservation, 'quantity' => '1']]];
+$sent = $client->post('dispatch-delivery', $sentInput, $csrf);
+same(201, $sent['status'], 'Delivery uses the active reservation');
+same(350, $sent['body']['lines'][0]['revenue_minor'], 'Dispatch posts the sales amount from the frozen order');
+same(100, $sent['body']['lines'][0]['cogs_minor'], 'Dispatch posts the exact batch carrying cost');
+same($sent['body']['shipment_id'], $client->post('dispatch-delivery', $sentInput, $csrf)['body']['shipment_id'], 'Dispatch replay does not ship a second time');
+$cancelDemand = $client->post('cancel-demand', ['id' => $firstDemand, 'reason' => 'Customer cancelled the remainder'], $csrf);
+same(200, $cancelDemand['status'], 'Sales can cancel the remaining volume after a partial delivery');
+$disposition = $cancelDemand['body']['dispositions'][0];
+same('shipping', $disposition['source_kind'], 'Cancel preserves a traceable disposition for the already dispatched units');
+same('resolved', $client->post('resolve-disposition', ['id' => $disposition['id'],
+    'reason' => 'Keep the completed shipment and invoice'], $csrf)['body']['state'], 'A planner records the disposition');
+
 $closed = $client->post('close-period', ['period' => $day], $csrf);
 same(200, $closed['status'], 'Financial period closes through the authorized HTTP action');
 same($closed['body']['digest'], $client->get('/?page=finance&period=' . $day)['body']['details']['快照摘要'],

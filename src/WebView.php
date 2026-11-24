@@ -27,6 +27,7 @@ final class WebView
         'open_item_difference' => '往来余额与总账不符', 'wip_difference' => '在制子账与总账不符',
         'intercompany_unmatched' => '跨法人出入账未配对',
         'awarded' => '已定标', 'void' => '已作废', 'replacement' => '替代料', 'overage' => '超额领料',
+        'transfer_in' => '库位调入', 'transfer_out' => '库位调出', 'inspection' => '质量判定',
     ];
 
     public static function e(mixed $value): string

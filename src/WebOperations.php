@@ -10,6 +10,7 @@ final class WebOperations extends Service
         'jobs.enqueue' => ['planner','warehouse'],
         'stock.opening' => ['warehouse'],
         'stock.transfer' => ['warehouse'],
+        'sales.create' => ['sales'],
         'mrp.calculate' => ['planner'],
         'purchase.rfq' => ['buyer'],
         'purchase.quote' => ['buyer'],
@@ -19,6 +20,8 @@ final class WebOperations extends Service
         'work.complete' => ['production'],
         'quality.decide' => ['quality'],
         'shipping.dispatch' => ['warehouse'],
+        'shipping.reserve' => ['warehouse','sales'],
+        'shipping.release' => ['warehouse','sales'],
         'finance.purchase_bill' => ['finance'],
         'finance.settle' => ['finance'],
         'finance.adjust' => ['finance'],
@@ -39,6 +42,9 @@ final class WebOperations extends Service
                 => (new ProcurementActions($this->db, $this->scope))->execute($action, $input),
             'post-purchase-bill', 'settle-open-item', 'post-adjustment', 'close-period', 'transfer-between-organizations'
                 => (new FinanceActions($this->db, $this->scope))->execute($action, $input),
+            'create-sale', 'cancel-demand', 'resolve-disposition', 'open-stock', 'move-stock',
+            'reserve-stock', 'release-reservation', 'dispatch-delivery'
+                => (new DeliveryActions($this->db, $this->scope))->execute($action, $input),
             default => throw new BusinessError('找不到此操作。', 404),
         };
     }

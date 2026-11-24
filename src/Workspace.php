@@ -30,7 +30,7 @@ final class Workspace extends WorkspaceScreen
         $before = isset($parameters['before']) ? WebInput::integer($parameters['before'], '分页游标') : PHP_INT_MAX;
         $screen = match ($page) {
             'home' => $this->home(),
-            'sales' => $this->sales($id, $before),
+            'sales' => (new SalesWorkspace($this->db, $this->scope))->screen($id, $before, WebInput::optionalId($parameters, 'demand')),
             'planning' => $this->planning($id, $before, WebInput::stringParameter($parameters, 'ref'),
                 WebInput::stringParameter($parameters, 'after'), WebInput::stringParameter($parameters, 'diff_after')),
             'jobs' => $this->jobs($id, $before, isset($parameters['row']) ? WebInput::integer($parameters['row'], '任务行号') : null,
@@ -101,39 +101,6 @@ final class Workspace extends WorkspaceScreen
             ],
         ];
         return $screen;
-    }
-
-    private function sales(?int $id, int $before): array
-    {
-        $sales = new Sales($this->db, $this->scope);
-        if ($id === null) {
-            $list = $this->paged($sales->list($before), 'id', 'sales');
-            return ['title' => '销售订单', 'tables' => [
-                $this->table('订单', ['number' => '销售单号', 'customer' => '客户名称', 'state' => '状态', 'created_at' => '登记时间'],
-                    $list['rows'], 'sales', 'number', $list['next']),
-            ]];
-        }
-        $order = $sales->order($id);
-        $demands = $order['demands'];
-        foreach ($demands as &$row) {
-            $row['outstanding_milli'] = (int) $row['qty_milli'] - (int) $row['dispatched_milli'];
-        }
-        unset($row);
-        $dispositions = $this->db->rows('SELECT x.* FROM demand_dispositions x JOIN sales_demands d ON d.id=x.demand_id AND d.org_id=x.org_id
-            JOIN sales_lines l ON l.id=d.line_id AND l.org_id=d.org_id WHERE x.org_id=? AND l.order_id=? ORDER BY x.id', [$this->scope->org, $id]);
-        $forms = [];
-        if ($order['state'] === 'draft' && $this->scope->can('sales')) {
-            $forms[] = $this->form('冻结销售需求', 'freeze-sale', [], ['id' => $id], '审核每一批交货日期与数量后冻结，物料计划将纳入这些需求。');
-        }
-        return ['title' => $order['number'], 'parent' => ['sales', '销售订单'], 'forms' => $forms, 'details' => [
-            '客户' => $order['customer'], '状态' => WebView::state($order['state']), '登记时间（UTC）' => $order['created_at'],
-            '冻结时间（UTC）' => $order['frozen_at'],
-        ], 'tables' => [
-            $this->table('交货计划', ['id' => '需求编号', 'code' => '物料', 'due_on' => '交期', 'qty_milli' => '需求',
-                'allocated_milli' => '已分配', 'dispatched_milli' => '已交付', 'outstanding_milli' => '未交付', 'state' => '状态', 'version' => '版本'], $demands),
-            $this->table('变更处置', ['id' => '处置编号', 'demand_id' => '需求编号', 'source_kind' => '来源',
-                'source_id' => '关联单据', 'qty_milli' => '数量', 'state' => '状态', 'reason' => '原因'], $dispositions),
-        ]];
     }
 
     private function planning(?int $id, int $before, string $ref, string $after, string $diffAfter): array

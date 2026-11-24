@@ -17,7 +17,7 @@ final class OperationsWorkspace extends WorkspaceScreen
             'work' => $this->work($id, $before, $parameters),
             'vendors' => $this->vendors($id, $before),
             'quality' => $this->quality($id, $before),
-            'shipments' => $this->shipments($id, $before),
+            'shipments' => $this->shipments($id, $before, WebInput::optionalId($parameters, 'customer')),
         };
     }
 
@@ -156,7 +156,16 @@ final class OperationsWorkspace extends WorkspaceScreen
     {
         $inventory = new Inventory($this->db, $this->scope);
         if ($id === null) {
-            return ['title' => '批次库存', 'tables' => [
+            $forms = $this->scope->can('warehouse') ? [$this->requestForm('登记期初库存', 'open-stock', [
+                $this->field('item', '物料', 'select', ['options' => $this->items()]),
+                $this->field('location', '库位', 'select', ['options' => $this->locations()]),
+                $this->field('code', '批号', 'text', ['maxlength' => 40]),
+                $this->field('uom', '源单位', 'text', ['maxlength' => 24]),
+                $this->quantityField('quantity', '期初数量（源单位）'),
+                $this->field('unit_cost', '基础单位成本', 'number', ['min' => '0', 'step' => '0.01']),
+                $this->dateField('posted_on', '期初入账日'),
+            ])] : [];
+            return ['title' => '批次库存', 'forms' => $forms, 'tables' => [
                 $this->listTable('库存批次', ['lot_code' => '批号', 'id' => '批次记录编号', 'code' => '物料', 'name' => '名称', 'base_uom' => '单位',
                     'available_milli' => '可用', 'pending_milli' => '待检', 'rework_milli' => '返工', 'rejected_milli' => '拒收',
                     'received_on' => '入库日期'], $inventory->lots($before), 'inventory', 'lot_code'),
@@ -168,7 +177,7 @@ final class OperationsWorkspace extends WorkspaceScreen
             $this->link('向上追溯', 'trace', $id, ['direction' => 'upstream']),
             $this->link('向下追溯', 'trace', $id, ['direction' => 'downstream']),
         ] : [];
-        return ['title' => $lot['lot_code'], 'parent' => ['inventory', '批次库存'], 'links' => $links,
+        return ['title' => $lot['lot_code'], 'parent' => ['inventory', '批次库存'], 'links' => $links, 'forms' => $this->moveForms($lot),
             'details' => ['批次记录编号' => $id, '物料' => $lot['item_code'] . ' ' . $lot['item_name'], '入库日' => $lot['received_on'],
                 '来源' => WebView::state($lot['origin_kind']), '原单位' => $lot['source_uom'],
                 '原始数量' => WebView::scaled($lot['source_qty_milli'], 3), '冻结换算' => WebView::scaled($lot['factor_milli'], 3),
@@ -179,6 +188,28 @@ final class OperationsWorkspace extends WorkspaceScreen
                     'event_kind' => '业务事件', 'event_id' => '事件号', 'posted_on' => '过账日期', 'actor' => '经手人'],
                     $movements['rows'], null, null, $movements['next']),
             ]];
+    }
+
+    private function moveForms(array $lot): array
+    {
+        if (!$this->scope->can('warehouse')) {
+            return [];
+        }
+        $origins = [];
+        foreach ($lot['balances'] as $balance) {
+            if (in_array($balance['quality'], ['available','rejected'], true)) {
+                $origins[$balance['location_id']] = $balance['code'] . ' · ' . $balance['name'];
+            }
+        }
+        if ($origins === []) {
+            return [];
+        }
+        return [$this->requestForm('移动批次库位', 'move-stock', [
+            $this->field('from', '调出库位', 'select', ['options' => $origins]),
+            $this->field('to', '调入库位', 'select', ['options' => $this->locations()]),
+            $this->field('quality', '库存状态', 'select', ['options' => ['available' => '可用', 'rejected' => '拒收'], 'value' => 'available']),
+            $this->quantityField('quantity', '移动数量（基础单位）'), $this->dateField('posted_on', '过账日期'),
+        ], ['id' => $lot['id']], '已分配库存保留在当前库位。')];
     }
 
     private function trace(int $id, string $direction): array
@@ -335,11 +366,11 @@ final class OperationsWorkspace extends WorkspaceScreen
                 'rework_milli' => '返工', 'reason' => '依据', 'measured_on' => '检验日期', 'actor' => '判定人', 'rework_order_id' => '关联返工'], $decisions)]];
     }
 
-    private function shipments(?int $id, int $before): array
+    private function shipments(?int $id, int $before, ?int $customer): array
     {
         $shipping = new Shipping($this->db, $this->scope);
         if ($id === null) {
-            return ['title' => '出库交付', 'tables' => [
+            return ['title' => '出库交付', ...$this->shipmentForms($customer), 'tables' => [
                 $this->listTable('交货单', ['number' => '交货单号', 'customer' => '客户', 'dispatched_on' => '交货日期'],
                     $shipping->shipments($before), 'shipments', 'number'),
             ]];
@@ -351,6 +382,45 @@ final class OperationsWorkspace extends WorkspaceScreen
             'details' => ['客户' => $shipment['customer'], '交付日期' => $shipment['dispatched_on']],
             'tables' => [$this->table('交货明细', ['order_number' => '销售单号', 'item_code' => '物料', 'lot_code' => '批号', 'lot_id' => '库存记录',
                 'qty_milli' => '实发数量', 'revenue_minor' => '销售金额', 'cogs_minor' => '销售成本'], $rows)]];
+    }
+
+    private function shipmentForms(?int $customer): array
+    {
+        if (!$this->scope->can('warehouse')) {
+            return [];
+        }
+        $org = $this->scope->org;
+        if ($customer === null) {
+            $rows = $this->db->rows("SELECT DISTINCT p.id,p.code,p.name FROM stock_reservations r
+                JOIN sales_demands d ON d.org_id=r.org_id AND d.id=r.demand_id JOIN sales_lines l ON l.org_id=d.org_id AND l.id=d.line_id
+                JOIN sales_orders s ON s.org_id=l.org_id AND s.id=l.order_id JOIN parties p ON p.org_id=s.org_id AND p.id=s.customer_id
+                WHERE r.org_id=? AND r.remaining_milli>0 AND d.state='released' ORDER BY p.code", [$org]);
+            $links = [];
+            foreach ($rows as $row) {
+                $links[] = $this->link('发货给 ' . $row['name'], 'shipments', null, ['customer' => $row['id']]);
+            }
+            return ['links' => $links];
+        }
+        $party = $this->party($customer, 'customer');
+        $rows = $this->db->rows("SELECT r.id,r.remaining_milli,l.lot_code,s.number,d.due_on FROM stock_reservations r
+            JOIN sales_demands d ON d.org_id=r.org_id AND d.id=r.demand_id JOIN sales_lines a ON a.org_id=d.org_id AND a.id=d.line_id
+            JOIN sales_orders s ON s.org_id=a.org_id AND s.id=a.order_id JOIN stock_lots l ON l.org_id=r.org_id AND l.id=r.lot_id
+            WHERE r.org_id=? AND s.customer_id=? AND d.state='released' AND r.remaining_milli>0 ORDER BY d.due_on,r.id", [$org, $customer]);
+        if ($rows === []) {
+            return [];
+        }
+        $options = [];
+        foreach ($rows as $row) {
+            $options[$row['id']] = $row['number'] . ' / ' . $row['lot_code'] . ' · ' . $row['due_on']
+                . ' · 待发 ' . WebView::scaled($row['remaining_milli'], 3);
+        }
+        return ['forms' => [$this->requestForm('发货给 ' . $party['name'], 'dispatch-delivery', [
+            $this->field('number', '交货单号', 'text', ['maxlength' => 40]), $this->dateField('dispatched_on', '交货日期'),
+            $this->field('lines', '交货分配行', 'rows', ['fields' => [
+                $this->field('reservation_id', '待发分配记录', 'select', ['options' => $options]),
+                $this->quantityField('quantity', '实发数量'),
+            ]]),
+        ], ['customer' => $customer], '发货将扣减库存并登记该客户的应收。')]];
     }
 
     private function requiredId(?int $id): int
