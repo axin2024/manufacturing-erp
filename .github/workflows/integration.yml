@@ -1,0 +1,48 @@
+name: ERP integration
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mysql-and-workbench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ERP_DB_PASSWORD: integration-db-only-4c9b
+      ERP_MYSQL_ROOT_PASSWORD: integration-root-only-6bf7
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Start a clean MySQL and Apache instance
+        run: |
+          docker compose config -q
+          docker compose build web
+          docker compose up --wait --wait-timeout 180 db web worker
+          curl --fail http://127.0.0.1:8080/health.php
+      - name: Run business and HTTP regressions
+        run: |
+          docker compose stop worker
+          docker compose cp tests web:/srv/erp/tests
+          docker compose cp examples web:/srv/erp/examples
+          docker compose exec -T web php bin/erp.php migrate
+          docker compose exec -T web php bin/erp.php health
+          docker compose exec -T web sh -e -c 'find bin src templates public examples tests -name "*.php" -print0 | xargs -0 -n 1 php -l'
+          for suite in planning-purchasing workshop delivery subcontract finance batch-jobs demo capacity extensions http-workspace; do
+            docker compose exec -T -e ERP_TEST_DATABASE=1 -e ERP_HTTP_URL=http://127.0.0.1:80 web php "tests/$suite.php"
+          done
+          docker compose start worker
+          docker compose ps --services --status running | grep -Fx worker
+      - name: Print service diagnostics
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail 80
+      - name: Remove disposable services
+        if: always()
+        run: docker compose down --volumes

@@ -1,0 +1,66 @@
+name: manufacturing-erp
+
+x-erp-app: &erp-app
+  build: .
+  image: manufacturing-erp:local
+  environment:
+    ERP_DSN: mysql:host=db;port=3306;dbname=manufacturing_erp;charset=utf8mb4
+    ERP_DB_USER: erp
+    ERP_DB_PASSWORD: ${ERP_DB_PASSWORD:?Set ERP_DB_PASSWORD in .env}
+    ERP_SECURE_COOKIES: "${ERP_SECURE_COOKIES:-0}"
+
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: manufacturing_erp
+      MYSQL_USER: erp
+      MYSQL_PASSWORD: ${ERP_DB_PASSWORD:?Set ERP_DB_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${ERP_MYSQL_ROOT_PASSWORD:?Set ERP_MYSQL_ROOT_PASSWORD in .env}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - MYSQL_PWD="$$MYSQL_PASSWORD" mysql --protocol=TCP -h 127.0.0.1 -u "$$MYSQL_USER" "$$MYSQL_DATABASE" -N -e 'SELECT 1'
+      interval: 3s
+      timeout: 5s
+      retries: 40
+    volumes:
+      - mysql-data:/var/lib/mysql
+    restart: unless-stopped
+
+  migrate:
+    <<: *erp-app
+    command: ["php", "bin/erp.php", "migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    <<: *erp-app
+    ports:
+      - "127.0.0.1:${ERP_HTTP_PORT:-8080}:80"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - php
+        - -r
+        - "exit(@file_get_contents('http://127.0.0.1/health.php') === '{\"status\":\"ready\"}' ? 0 : 1);"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  worker:
+    <<: *erp-app
+    command: ["php", "bin/erp.php", "worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  mysql-data:

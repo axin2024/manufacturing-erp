@@ -1,0 +1,8 @@
+Manufacturing ERP
+
+The application source, documentation and synthetic demonstration fixtures are
+distributed under the Apache License, Version 2.0. See LICENSE.
+
+See docs/dependencies.md for third-party runtimes, build dependencies and the
+asset inventory. Locally built container images inherit the notices of their
+base images and the software included in those images.

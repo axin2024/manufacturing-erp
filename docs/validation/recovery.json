@@ -1,0 +1,24 @@
+{
+  "format_version": 1,
+  "platform": "Windows",
+  "php": "8.2.30",
+  "mysql": "8.4.13",
+  "previous_commit": "f10c9b445ad1244a85de78834e4457cc3ea643a4",
+  "tested_application_commit": "b4dac49b2a6e5fe250d96a9b0dbb4934ea7495c2",
+  "migration": "013_extension_versions",
+  "backup_bytes": 152055,
+  "backup_sha256": "fb785f74e148e64c3ba938db757fff9097ee5dd00c324dc9b7353256143af087",
+  "same_on_upgrade_and_restore": true,
+  "facts": {
+    "org_count": 2,
+    "shortage_milli": 100000,
+    "shipped_milli": 98000,
+    "customer_code": "C-PRECISION",
+    "substitute_variance_minor": 2000,
+    "receivable_minor": 637000,
+    "payable_minor": 156000,
+    "receipt_shipment_id": 1,
+    "period_state": "closed",
+    "period_digest": "1aeb67ddb7493f78799e2834c67a347feead8aca863ecbde63d627afa389f24f"
+  }
+}
