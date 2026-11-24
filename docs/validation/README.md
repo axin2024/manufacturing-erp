@@ -2,6 +2,8 @@
 
 在 Windows x64、PHP 8.2.30、MySQL Community 8.4.13 上从空白数据库执行 13 个迁移。使用回环 PHP 服务运行 HTML 表单、JSON、会话与 CSV 回归。实际 MySQL 事务参与每个业务套件。集成执行共通过 571 项断言，其中 HTTP 225 项，版本扩展 16 项。
 
+在 Ubuntu 24.04 的干净运行器上，Compose 另行构建 PHP 8.4 与 Apache 镜像，等待 MySQL 8.4、迁移、HTTP 健康检查和后台工作进程就绪，再运行同一套回归。[容器验证记录](https://github.com/axin2024/manufacturing-erp/actions/runs/45421982090)
+
 | 用例 | 实测结果 | 回归代码 |
 | --- | --- | --- |
 | AC-01 | 两箱按 10 件每箱入库。 | [主数据与采购](../../tests/planning-purchasing.php) |

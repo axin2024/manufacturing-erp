@@ -61,6 +61,7 @@ exit
 - [安装、配置、升级和备份恢复](docs/deployment.md)
 - [业务架构与接口](docs/architecture.md)
 - [产品需求与验收基线](docs/requirements/01-产品总览-prd.md)
+- [演示操作与异常复现](docs/walkthrough.md)
 - [BOM 导入、检验规则和成本分摊扩展](docs/extensions.md)
 - [业务验收与性能记录](docs/validation/README.md)
 - [贡献指南](CONTRIBUTING.md) · [安全反馈](SECURITY.md)
