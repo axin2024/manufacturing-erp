@@ -1,6 +1,6 @@
 # 业务验收记录
 
-在 Windows x64、PHP 8.2.30、MySQL Community 8.4.13 上从空白数据库执行 13 个迁移。使用回环 PHP 服务运行 HTML 表单、JSON、会话与 CSV 回归。实际 MySQL 事务参与每个业务套件。集成执行共通过 571 项断言，其中 HTTP 225 项，版本扩展 16 项。
+在 Windows x64、PHP 8.2.30、MySQL Community 8.4.13 上从空白数据库执行 13 个迁移。使用回环 PHP 服务运行 HTML 表单、JSON、会话与 CSV 回归。实际 MySQL 事务参与每个业务套件。集成执行共通过 574 项断言，其中 HTTP 227 项，版本扩展 16 项。
 
 在 Ubuntu 24.04 的干净运行器上，Compose 另行构建 PHP 8.4 与 Apache 镜像，等待 MySQL 8.4、迁移、HTTP 健康检查和后台工作进程就绪，再运行同一套回归。[容器验证记录](https://github.com/axin2024/manufacturing-erp/actions/runs/45421982090)
 
@@ -15,7 +15,7 @@
 | AC-07 | 需求 200 件，扣减 70 件现货及 30 件按期在途，净缺 100 件。 | [主数据与采购](../../tests/planning-purchasing.php) |
 | AC-08 | 晚到和未确认供给都不会冲抵本期短缺。 | [主数据与采购](../../tests/planning-purchasing.php) |
 | AC-09 | 分批收货合计 100 件，95 件放行，5 件仍列待检。 | [主数据与采购](../../tests/planning-purchasing.php) |
-| AC-10 | 相同收货请求返回原回执，采购单仍只有两次收货，放行数量保持 35 件。 | [主数据与采购](../../tests/planning-purchasing.php) |
+| AC-10 | 固定夹具的重复请求保留两次业务收货和 35 件放行。HTTP 客户端断开时可按键找回持久回执，表单及 JSON 重试后仍只有一张独立测试收货单。 | [主数据与采购](../../tests/planning-purchasing.php) · [HTTP](../../tests/http-workspace.php) |
 | AC-11 | 第二张工单争用同一机台时间段时返回冲突并附原工单号。 | [车间](../../tests/workshop.php) |
 | AC-12 | 超领需审批。委外留存的 5 件分列为结案差异，能追到委外发料单。 | [车间](../../tests/workshop.php) · [委外](../../tests/subcontract.php) |
 | AC-13 | 100 台完工，2 台转返工，首批只能发出 98 台。 | [交付](../../tests/delivery.php) |

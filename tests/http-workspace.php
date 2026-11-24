@@ -38,6 +38,34 @@ final class WebTestClient
         return $this->request('/?action=' . rawurlencode($action), $data + ['_csrf' => $csrf], '', false, true);
     }
 
+    public function submitAndDropResponse(string $action, array $data, string $csrf, callable $committed): void
+    {
+        $host = substr($this->base, strlen('http://'));
+        $socket = stream_socket_client('tcp://' . $host, timeout: 5);
+        if ($socket === false) {
+            throw new RuntimeException('Could not connect to the disposable HTTP server.');
+        }
+
+        try {
+            $body = http_build_query($data + ['_csrf' => $csrf]);
+            $request = 'POST /?action=' . rawurlencode($action) . " HTTP/1.1\r\n"
+                . "Host: $host\r\nCookie: $this->cookie\r\nConnection: close\r\nAccept: text/html\r\n"
+                . "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: " . strlen($body) . "\r\n\r\n" . $body;
+            if (fwrite($socket, $request) !== strlen($request)) {
+                throw new RuntimeException('The test request was not sent in full.');
+            }
+            $deadline = hrtime(true) + 5_000_000_000;
+            while (!$committed()) {
+                if (hrtime(true) >= $deadline) {
+                    throw new RuntimeException('The receipt did not become durable before the client disconnected.');
+                }
+                usleep(20_000);
+            }
+        } finally {
+            fclose($socket);
+        }
+    }
+
     private function request(string $route, ?array $data, string $csrf, bool $json, bool $form = false): array
     {
         $headers = ['Accept: ' . ($json ? 'application/json' : 'text/html'), 'Connection: close'];
@@ -245,15 +273,21 @@ $receiptData = ['id' => $orderId, 'number' => 'RC-HTTP', 'received_on' => $day, 
     0 => ['line_id' => $line, 'lot' => 'HTTP-LOT-A', 'location' => $raw, 'quantity' => '1.125'],
     2 => ['line_id' => $line, 'lot' => 'HTTP-LOT-B', 'location' => $raw, 'quantity' => '2.375'],
 ]];
+$client->submitAndDropResponse('receive-purchase', $receiptData, $csrf,
+    fn(): bool => $db->row("SELECT 1 FROM operation_receipts WHERE org_id=? AND kind='purchase.receive' AND request_key=?",
+        [$scope->org, $receiptData['request_key']]) !== null);
+$recovered = $client->get('/?page=receipt&operation=purchase.receive&request_key=' . $receiptData['request_key']);
+same(200, $recovered['status'], 'The receipt is discoverable after the client disconnects without reading the response');
+$receiptId = $recovered['body']['result']['receipt_id'];
 $form = $client->submit('receive-purchase', $receiptData, $csrf);
-same(303, $form['status'], 'Browser form posts two batches with a deleted middle row');
+same(303, $form['status'], 'Retrying the browser form preserves the original receipt and supports a deleted middle row');
 $receiptReplay = [...$receiptData, 'lines' => array_values($receiptData['lines'])];
 $postedReceipt = $client->post('receive-purchase', $receiptReplay, $csrf);
 same(201, $postedReceipt['status'], 'Repeating the same request after final receipt returns the stored result');
-$receiptId = $postedReceipt['body']['receipt_id'];
+same($receiptId, $postedReceipt['body']['receipt_id'], 'JSON retry returns the durable receipt ID');
 same('/?page=inbound&id=' . $receiptId, $form['headers']['location'], 'Browser lands on the original receipt');
-same($receiptId, $client->get('/?page=receipt&operation=purchase.receive&request_key=' . $receiptData['request_key'])['body']['result']['receipt_id'],
-    'Lost response is recoverable by receipt key');
+same(1, (int) $db->row('SELECT COUNT(*) AS total FROM receipts WHERE org_id=? AND order_id=?', [$scope->org, $orderId])['total'],
+    'There is only one posted receipt after both retries');
 $receivedLines = $client->get('/?page=inbound&id=' . $receiptId)['body']['tables'][0]['rows'];
 same([1125, 2375], array_column($receivedLines, 'pending_milli'), 'Each confirmed batch has its own pending inspection');
 $inspectId = $receivedLines[0]['inspection_id'];

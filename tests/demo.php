@@ -38,6 +38,8 @@ $expected = [
 ];
 same($expected, $facts, 'Integrated scenario matches independently calculated quantity and cost answers');
 same(2, count($identity->organizations($user)), 'The group has factory and trade organizations');
+same(['ASSEMBLY', 'TESTING'], array_column($db->rows('SELECT code FROM departments WHERE org_id=? ORDER BY code',
+    [$scope->org]), 'code'), 'The demo installs the two named manufacturing departments');
 $trade = $identity->scope($user, $installed['trade_org_id']);
 same([], (new Inventory($db, $trade))->lots(), 'The trading company starts with separate stock');
 $order = new WorkOrders($db, $scope);
