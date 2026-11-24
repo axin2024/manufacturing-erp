@@ -139,6 +139,18 @@ final class ProductEngineering extends Service
         if ($bom === null) {
             return null;
         }
+        return $this->assembleBom($bom);
+    }
+
+    public function bomRevision(int $id): array
+    {
+        $bom = $this->db->row('SELECT id,item_id,effective_on FROM boms WHERE org_id=? AND id=?', [$this->scope->org, $id]);
+        Value::assert($bom !== null, '该 BOM 版本不在本账套。', 404);
+        return $this->assembleBom($bom);
+    }
+
+    private function assembleBom(array $bom): array
+    {
         $bom['lines'] = $this->db->rows('SELECT c.item_id,i.code,i.name,i.base_uom,c.qty_per_milli,c.source_uom,c.factor_milli,c.loss_bps
             FROM bom_components c JOIN items i ON i.id=c.item_id WHERE c.org_id=? AND c.bom_id=? ORDER BY i.code', [$this->scope->org, $bom['id']]);
         $alternatives = $this->db->rows('SELECT item_id,alternative_item_id FROM bom_alternatives

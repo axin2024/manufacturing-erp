@@ -41,6 +41,14 @@ final class Value
         return $quantity;
     }
 
+    public static function timestamp(string $value): string
+    {
+        $moment = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value);
+        self::assert($moment !== false && $moment->format('Y-m-d H:i:s') === $value && $value >= '1000-01-01 00:00:00',
+            '时间格式无效，请使用 UTC 的 YYYY-MM-DD HH:MM:SS。');
+        return $value;
+    }
+
     public static function unitPrice(int $cents): int
     {
         self::assert($cents >= 0 && $cents <= self::MAX_UNIT_PRICE, '单价超出有效范围。');

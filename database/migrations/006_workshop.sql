@@ -1,0 +1,180 @@
+CREATE TABLE IF NOT EXISTS work_orders (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    org_id BIGINT UNSIGNED NOT NULL,
+    number VARCHAR(40) NOT NULL,
+    kind ENUM('manufacture','subcontract','rework') NOT NULL,
+    item_id BIGINT UNSIGNED NOT NULL,
+    proposal_id BIGINT UNSIGNED NULL,
+    bom_id BIGINT UNSIGNED NULL,
+    route_id BIGINT UNSIGNED NULL,
+    parent_work_id BIGINT UNSIGNED NULL,
+    rework_decision_id BIGINT UNSIGNED NULL,
+    qty_milli BIGINT UNSIGNED NOT NULL,
+    produced_milli BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    standard_unit_cost_minor BIGINT UNSIGNED NOT NULL,
+    engineering_on DATE NOT NULL,
+    starts_on DATE NOT NULL,
+    due_on DATE NOT NULL,
+    state ENUM('draft','approved','released','active','paused','waiting_quality','closed','cancelled') NOT NULL DEFAULT 'draft',
+    hold_reason VARCHAR(255) NULL,
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    started_at DATETIME(6) NULL,
+    closed_on DATE NULL,
+    UNIQUE KEY (org_id,number),
+    UNIQUE KEY (org_id,id),
+    UNIQUE KEY (rework_decision_id),
+    KEY (org_id,state,id),
+    FOREIGN KEY (org_id,item_id) REFERENCES org_items(org_id,item_id),
+    FOREIGN KEY (org_id,proposal_id) REFERENCES mrp_proposals(org_id,id),
+    FOREIGN KEY (org_id,bom_id) REFERENCES boms(org_id,id),
+    FOREIGN KEY (org_id,route_id) REFERENCES routes(org_id,id),
+    FOREIGN KEY (org_id,parent_work_id) REFERENCES work_orders(org_id,id),
+    FOREIGN KEY (rework_decision_id) REFERENCES inspection_decisions(id),
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    CHECK (qty_milli>0 AND produced_milli<=qty_milli AND starts_on<=due_on)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS work_materials (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    org_id BIGINT UNSIGNED NOT NULL,
+    work_id BIGINT UNSIGNED NOT NULL,
+    item_id BIGINT UNSIGNED NOT NULL,
+    plan_milli BIGINT UNSIGNED NOT NULL,
+    issued_milli BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    returned_milli BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    standard_unit_cost_minor BIGINT UNSIGNED NOT NULL,
+    qty_per_milli BIGINT UNSIGNED NOT NULL,
+    loss_bps SMALLINT UNSIGNED NOT NULL,
+    UNIQUE KEY (org_id,id),
+    UNIQUE KEY (work_id,item_id),
+    FOREIGN KEY (org_id,work_id) REFERENCES work_orders(org_id,id),
+    FOREIGN KEY (org_id,item_id) REFERENCES org_items(org_id,item_id),
+    CHECK (plan_milli>0 AND returned_milli<=issued_milli AND loss_bps<10000)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS work_operations (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    org_id BIGINT UNSIGNED NOT NULL,
+    work_id BIGINT UNSIGNED NOT NULL,
+    sequence_no SMALLINT UNSIGNED NOT NULL,
+    center_id BIGINT UNSIGNED NOT NULL,
+    label VARCHAR(140) NOT NULL,
+    standard_seconds BIGINT UNSIGNED NOT NULL,
+    UNIQUE KEY (org_id,id),
+    UNIQUE KEY (work_id,sequence_no),
+    FOREIGN KEY (org_id,work_id) REFERENCES work_orders(org_id,id),
+    FOREIGN KEY (org_id,center_id) REFERENCES work_centers(org_id,id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS machines (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    org_id BIGINT UNSIGNED NOT NULL,
+    center_id BIGINT UNSIGNED NOT NULL,
+    code VARCHAR(40) NOT NULL,
+    name VARCHAR(140) NOT NULL,
+    UNIQUE KEY (org_id,code),
+    UNIQUE KEY (org_id,id),
+    FOREIGN KEY (org_id,center_id) REFERENCES work_centers(org_id,id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS operation_slots (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    org_id BIGINT UNSIGNED NOT NULL,
+    operation_id BIGINT UNSIGNED NOT NULL,
+    machine_id BIGINT UNSIGNED NOT NULL,
+    starts_at DATETIME NOT NULL,
+    ends_at DATETIME NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    actor_id BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY (org_id,id),
+    KEY (org_id,machine_id,active,starts_at,ends_at),
+    KEY (org_id,operation_id,active),
+    FOREIGN KEY (org_id,operation_id) REFERENCES work_operations(org_id,id),
+    FOREIGN KEY (org_id,machine_id) REFERENCES machines(org_id,id),
+    FOREIGN KEY (actor_id) REFERENCES users(id),
+    CHECK (starts_at<ends_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS work_issue_authorizations (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    org_id BIGINT UNSIGNED NOT NULL,
+    material_id BIGINT UNSIGNED NOT NULL,
+    kind ENUM('substitute','overage') NOT NULL,
+    use_item_id BIGINT UNSIGNED NOT NULL,
+    qty_milli BIGINT UNSIGNED NOT NULL,
+    used_milli BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    reason VARCHAR(255) NOT NULL,
+    approved_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY (org_id,id),
+    FOREIGN KEY (org_id,material_id) REFERENCES work_materials(org_id,id),
+    FOREIGN KEY (org_id,use_item_id) REFERENCES org_items(org_id,item_id),
+    FOREIGN KEY (approved_by) REFERENCES users(id),
+    CHECK (qty_milli>0 AND used_milli<=qty_milli)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS work_issues (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    org_id BIGINT UNSIGNED NOT NULL,
+    material_id BIGINT UNSIGNED NOT NULL,
+    work_id BIGINT UNSIGNED NOT NULL,
+    lot_id BIGINT UNSIGNED NOT NULL,
+    location_id BIGINT UNSIGNED NOT NULL,
+    replacement_approval_id BIGINT UNSIGNED NULL,
+    overage_approval_id BIGINT UNSIGNED NULL,
+    qty_milli BIGINT UNSIGNED NOT NULL,
+    returned_milli BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    consumed_milli BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    unit_cost_minor BIGINT UNSIGNED NOT NULL,
+    issued_on DATE NOT NULL,
+    actor_id BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY (org_id,id),
+    KEY (org_id,work_id,id),
+    FOREIGN KEY (org_id,material_id) REFERENCES work_materials(org_id,id),
+    FOREIGN KEY (org_id,work_id) REFERENCES work_orders(org_id,id),
+    FOREIGN KEY (org_id,lot_id) REFERENCES stock_lots(org_id,id),
+    FOREIGN KEY (org_id,location_id) REFERENCES locations(org_id,id),
+    FOREIGN KEY (org_id,replacement_approval_id) REFERENCES work_issue_authorizations(org_id,id),
+    FOREIGN KEY (org_id,overage_approval_id) REFERENCES work_issue_authorizations(org_id,id),
+    FOREIGN KEY (actor_id) REFERENCES users(id),
+    CHECK (qty_milli>0 AND returned_milli+consumed_milli<=qty_milli)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS work_returns (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    org_id BIGINT UNSIGNED NOT NULL,
+    issue_id BIGINT UNSIGNED NOT NULL,
+    location_id BIGINT UNSIGNED NOT NULL,
+    qty_milli BIGINT UNSIGNED NOT NULL,
+    received_on DATE NOT NULL,
+    actor_id BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY (org_id,id),
+    FOREIGN KEY (org_id,issue_id) REFERENCES work_issues(org_id,id),
+    FOREIGN KEY (org_id,location_id) REFERENCES locations(org_id,id),
+    FOREIGN KEY (actor_id) REFERENCES users(id),
+    CHECK (qty_milli>0)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS work_cost_entries (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    org_id BIGINT UNSIGNED NOT NULL,
+    work_id BIGINT UNSIGNED NOT NULL,
+    element ENUM('material','labor','overhead','subcontract','capitalized','adjustment') NOT NULL,
+    source_kind VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    source_id BIGINT UNSIGNED NOT NULL,
+    actual_minor BIGINT NOT NULL,
+    standard_minor BIGINT NOT NULL,
+    posted_on DATE NOT NULL,
+    period_start DATE NOT NULL,
+    actor_id BIGINT UNSIGNED NOT NULL,
+    UNIQUE KEY (org_id,id),
+    UNIQUE KEY (org_id,source_kind,source_id,element),
+    KEY (org_id,work_id,element,id),
+    FOREIGN KEY (org_id,work_id) REFERENCES work_orders(org_id,id),
+    FOREIGN KEY (org_id,period_start) REFERENCES fiscal_periods(org_id,period_start),
+    FOREIGN KEY (actor_id) REFERENCES users(id)
+) ENGINE=InnoDB;
