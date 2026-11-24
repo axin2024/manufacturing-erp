@@ -48,6 +48,14 @@ abstract class WorkspaceScreen extends Service
         return compact('name', 'label', 'type') + $settings;
     }
 
+    protected function nameFields(string $entity, int $length = 140): array
+    {
+        return [
+            $this->field('code', $entity . '编码', 'text', ['maxlength' => 40]),
+            $this->field('name', $entity . '名称', 'text', ['maxlength' => $length]),
+        ];
+    }
+
     protected function quantityField(string $name, string $label, bool $allowZero = false): array
     {
         return $this->field($name, $label, 'number', $allowZero ? ['min' => '0', 'step' => '0.001', 'value' => '0']

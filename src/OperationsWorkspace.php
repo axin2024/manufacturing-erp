@@ -265,6 +265,15 @@ final class OperationsWorkspace extends WorkspaceScreen
                 $record['rework_orders'], 'work', 'number'),
         ];
         $links = [];
+        if ($this->scope->can('planner', 'production')) {
+            if ($record['bom_id'] !== null) {
+                $links[] = $this->link('工单冻结的 BOM', 'bom', (int) $record['bom_id']);
+            }
+            if ($record['route_id'] !== null) {
+                $links[] = $this->link('工单冻结的工艺路线', 'route', (int) $record['route_id']);
+            }
+            $links[] = $this->link('计划开工日的产能日历', 'capacity', null, ['from' => $record['starts_on'], 'to' => $record['starts_on']]);
+        }
         if ($record['parent_work_id'] !== null) {
             $links[] = $this->link('原生产工单', 'work', (int) $record['parent_work_id']);
         }

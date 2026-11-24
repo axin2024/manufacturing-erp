@@ -75,7 +75,7 @@ final class Scheduling extends Service
     {
         $this->requireRole('planner', 'production');
         Value::assert(Value::timestamp($from) < Value::timestamp($to), '查询开始时间须早于结束时间。');
-        return $this->db->rows('SELECT s.id,s.starts_at,s.ends_at,m.code AS machine,w.number,p.label,p.standard_seconds
+        return $this->db->rows('SELECT s.id,s.starts_at,s.ends_at,m.code AS machine,w.id AS work_id,w.number,p.label,p.standard_seconds
             FROM operation_slots s JOIN machines m ON m.id=s.machine_id JOIN work_operations p ON p.id=s.operation_id
             JOIN work_orders w ON w.id=p.work_id WHERE s.org_id=? AND s.active=1 AND s.starts_at<? AND s.ends_at>?
             ORDER BY s.starts_at,s.machine_id,s.id', [$this->scope->org, $to, $from]);

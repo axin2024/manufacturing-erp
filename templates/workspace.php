@@ -20,6 +20,9 @@ use ManufacturingErp\WebView;
 <?php if (($screen['filters'] ?? []) !== []): ?>
     <form class="filters" method="get" action="/">
         <input type="hidden" name="page" value="<?= WebView::e($page) ?>">
+        <?php foreach (($screen['filter_parameters'] ?? []) as $key => $value): ?>
+            <input type="hidden" name="<?= WebView::e($key) ?>" value="<?= WebView::e($value) ?>">
+        <?php endforeach; ?>
         <?php foreach ($screen['filters'] as $field): ?>
             <label><?= WebView::e($field['label']) ?>
                 <input name="<?= WebView::e($field['name']) ?>" type="<?= WebView::e($field['type']) ?>"

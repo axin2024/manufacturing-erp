@@ -60,6 +60,9 @@ final class WebOperations extends Service
                 => (new WorkshopActions($this->db, $this->scope))->execute($action, $input),
             'create-vendor-contract', 'send-vendor-material', 'return-vendor-material', 'write-off-vendor-material',
             'receive-vendor-output', 'match-vendor-fee' => (new VendorActions($this->db, $this->scope))->execute($action, $input),
+            'create-organization', 'add-department', 'add-member', 'set-membership', 'add-item', 'publish-conversion',
+            'add-location', 'add-party', 'publish-bom', 'publish-route', 'add-center', 'add-machine', 'add-shift'
+                => (new SetupActions($this->db, $this->scope))->execute($action, $input),
             default => throw new BusinessError('找不到此操作。', 404),
         };
     }

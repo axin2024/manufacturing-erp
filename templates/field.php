@@ -5,8 +5,10 @@ $required = $field['required'] ?? true;
 <label>
     <?= WebView::e($field['label']) ?>
     <?php if ($field['type'] === 'select'): ?>
-        <select name="<?= WebView::e($fieldName) ?>" <?= $required ? 'required' : '' ?>>
-            <option value="">请选择</option>
+        <?php $multiple = $field['multiple'] ?? false; ?>
+        <select name="<?= WebView::e($fieldName . ($multiple ? '[]' : '')) ?>" <?= $required ? 'required' : '' ?>
+            <?= $multiple ? 'multiple size="4"' : '' ?>>
+            <?php if (!$multiple): ?><option value="">请选择</option><?php endif; ?>
             <?php foreach ($field['options'] as $key => $label): ?>
                 <option value="<?= WebView::e($key) ?>"
                     <?= (string) ($field['value'] ?? '') === (string) $key ? 'selected' : '' ?>><?= WebView::e($label) ?></option>

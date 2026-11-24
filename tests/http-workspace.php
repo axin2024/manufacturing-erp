@@ -465,6 +465,96 @@ same(404, $other->get($receipt)['status'], 'An unrelated organization cannot que
 same(404, $other->get('/?page=export&kind=lot-trace&id=' . $stock['substitute_lot_id'], false)['status'], 'Cross-tenant CSV request is refused');
 same(404, $other->get('/?page=vendors&id=' . $contract)['status'], 'Cross-tenant vendor order lookup is refused');
 same(404, $other->get('/?page=journals&id=' . $journal)['status'], 'Cross-tenant journal lookup is refused');
+
+$newOrg = $client->post('create-organization', ['code' => 'HTTP-SETUP', 'name' => 'Engineering pilot', 'currency' => 'CNY'], $csrf);
+same(201, $newOrg['status'], 'Administrator creates a new ledger through the workbench');
+$pilot = $newOrg['body']['org_id'];
+$switchPilot = $client->post('switch-org', ['org_id' => $pilot], $csrf);
+same($pilot, $switchPilot['body']['organization_id'], 'New ledger is immediately selectable');
+$csrf = $switchPilot['body']['csrf'];
+$setupEmail = 'workspace-plan-' . $tag . '@example.test';
+$member = $client->post('add-member', ['name' => 'Pilot planner', 'email' => $setupEmail, 'password' => $password, 'role' => 'planner'], $csrf);
+same(201, $member['status'], 'Administrator registers a planner in the new ledger');
+$memberId = $member['body']['user_id'];
+same(true, str_contains($client->get('/?page=members', false)['body'], $setupEmail), 'Group member listing shows the new account');
+same(404, $client->post('set-membership', ['user' => $external['user'], 'role' => 'admin', 'enabled' => 1], $csrf)['status'],
+    'Administrators cannot grant roles to an unrelated tenant account');
+$department = $client->post('add-department', ['code' => 'PILOT', 'name' => 'Pilot workshop'], $csrf)['body']['department_id'];
+$planner = new WebTestClient($base);
+$plannerStart = $planner->get('/?page=session')['body']['csrf'];
+$plannerLogin = $planner->post('login', ['email' => $setupEmail, 'password' => $password], $plannerStart);
+same($pilot, $plannerLogin['body']['organization_id'], 'Planner enters the assigned pilot ledger');
+$plannerCsrf = $plannerLogin['body']['csrf'];
+same(403, $planner->get('/?page=members')['status'], 'Planner cannot browse account email addresses');
+same(403, $planner->post('add-location', ['code' => 'PILOT', 'name' => 'Pilot area'], $plannerCsrf)['status'],
+    'Planner cannot create a warehouse location');
+same(201, $client->post('add-location', ['code' => 'PILOT', 'name' => 'Pilot area'], $csrf)['status'], 'Warehouse location is posted by an administrator');
+same(201, $client->post('add-party', ['code' => 'PILOT-SRC', 'name' => 'Pilot supplier', 'kind' => 'supplier'], $csrf)['status'],
+    'Supplier is available from the party directory');
+
+$itemData = ['name' => 'Fixture component', 'uom' => 'ea', 'sourcing' => 'purchase', 'standard_cost' => '1.25', 'lead_days' => '2'];
+$component = $planner->post('add-item', ['code' => 'SET-PART'] + $itemData, $plannerCsrf)['body']['item_id'];
+$alternative = $planner->post('add-item', ['code' => 'SET-ALT'] + $itemData, $plannerCsrf)['body']['item_id'];
+$product = $planner->post('add-item', ['code' => 'SET-PRODUCT', 'name' => 'Fixture assembly', 'sourcing' => 'manufacture'] + $itemData,
+    $plannerCsrf)['body']['item_id'];
+$tomorrow = (new DateTimeImmutable($day))->modify('+1 day')->format('Y-m-d');
+same(201, $planner->post('publish-conversion', ['item' => $component, 'uom' => 'box', 'effective_on' => $day, 'factor' => '5'], $plannerCsrf)['status'],
+    'Planner publishes a packaging conversion');
+same(201, $planner->post('publish-conversion', ['item' => $component, 'uom' => 'box', 'effective_on' => $tomorrow, 'factor' => '6'], $plannerCsrf)['status'],
+    'Future conversion can coexist with the current one');
+$center = $planner->post('add-center', ['department' => $department, 'code' => 'CELL', 'name' => 'Assembly cell'], $plannerCsrf)['body']['center_id'];
+$machine = $planner->post('add-machine', ['center' => $center, 'code' => 'BENCH', 'name' => 'Bench press'], $plannerCsrf)['body']['machine_id'];
+$shift = ['center' => $center, 'starts_at' => $day . 'T08:00', 'ends_at' => $day . 'T16:00'];
+same(201, $planner->post('add-shift', $shift, $plannerCsrf)['status'], 'Planner publishes a UTC shift');
+same(409, $planner->post('add-shift', $shift, $plannerCsrf)['status'], 'The workbench rejects overlapping capacity shifts');
+$engineering = '/?page=engineering&id=' . $product;
+$engineeringHtml = $planner->get($engineering . '&on=' . $day, false)['body'];
+same(true, str_contains($engineeringHtml, 'name="lines[0][alternatives][]"'), 'BOM form provides a multiselect for substitution');
+same(true, str_contains($engineeringHtml, 'name="id" value="' . $product . '"'), 'Changing the effective date preserves the selected item');
+$bomData = ['item' => $product, 'effective_on' => $day, 'lines' => [
+    2 => ['item' => $component, 'quantity' => '2', 'uom' => 'box', 'loss_percent' => '1.25', 'alternatives' => [$alternative]],
+]];
+$bomPost = $planner->submit('publish-bom', $bomData, $plannerCsrf);
+same(303, $bomPost['status'], 'HTML submits a BOM with an alternative and a noncontiguous row index');
+$bomUrl = $bomPost['headers']['location'];
+$firstBom = $planner->get($bomUrl)['body'];
+same(10_000, $firstBom['tables'][0]['rows'][0]['qty_per_milli'], 'BOM preserves the published transaction conversion');
+same(125, $firstBom['tables'][0]['rows'][0]['loss_bps'], 'Loss is stored in basis points');
+same('SET-ALT', $firstBom['tables'][0]['rows'][0]['alternatives'], 'BOM detail resolves the alternative code');
+$bomData['effective_on'] = $tomorrow;
+$bomData['lines'] = array_values($bomData['lines']);
+$nextBom = $planner->post('publish-bom', $bomData, $plannerCsrf)['body'];
+same(12_000, $planner->get($nextBom['url'])['body']['tables'][0]['rows'][0]['qty_per_milli'], 'New BOM applies the new version of the conversion');
+$bomAt = $planner->get($engineering . '&on=' . $tomorrow)['body'];
+same($nextBom['bom_id'], $bomAt['details']['BOM版本'], 'Engineering inquiry selects the version effective on the requested date');
+$route = $planner->post('publish-route', ['item' => $product, 'effective_on' => $day, 'steps' => [
+    ['center' => $center, 'label' => 'Press fit', 'setup_minutes' => 2, 'run_seconds_per_unit' => 30],
+]], $plannerCsrf)['body'];
+same(2, $planner->get($route['url'])['body']['tables'][0]['rows'][0]['setup_minutes'], 'Route detail shows standard preparation time');
+$pilotWork = $planner->post('create-work', ['item' => $product, 'quantity' => '2', 'number' => 'WO-PILOT', 'engineering_on' => $day,
+    'starts_on' => $day, 'due_on' => $day, 'request_key' => 'http-pilot-work'], $plannerCsrf)['body']['work_id'];
+$planner->post('approve-work', ['id' => $pilotWork], $plannerCsrf);
+$workUrl = '/?page=work&id=' . $pilotWork;
+$pilotRecord = $planner->get($workUrl)['body'];
+same(180, $pilotRecord['tables'][0]['rows'][0]['standard_seconds'], 'Work order snapshots standard engineering time');
+same(true, in_array($bomUrl, array_column($pilotRecord['links'], 'url'), true), 'Work order links to its original BOM revision');
+same(true, in_array($route['url'], array_column($pilotRecord['links'], 'url'), true), 'Work order links to its original route revision');
+same(201, $planner->post('book-operation', ['operation' => $pilotRecord['tables'][0]['rows'][0]['id'], 'machine' => $machine,
+    'starts_at' => $day . 'T09:00', 'ends_at' => $day . 'T09:05', 'request_key' => 'http-pilot-book'], $plannerCsrf)['status'],
+    'Planner books a production operation inside the published shift');
+$calendar = $planner->get('/?page=capacity&from=' . $day . '&to=' . $day)['body'];
+same($workUrl, $calendar['tables'][0]['rows'][0]['_links']['number'], 'Capacity calendar links to the booked work order');
+same('BENCH', $calendar['tables'][0]['rows'][0]['machine'], 'Capacity calendar shows the assigned machine');
+same('CELL', $calendar['tables'][1]['rows'][0]['code'], 'Capacity calendar shows the matching shift');
+same(404, $other->get($bomUrl)['status'], 'Engineering version lookup is scoped to the ledger');
+same(403, $warehouse->get($route['url'])['status'], 'Warehouse operators do not have engineering access');
+$audit = $client->get('/?page=organizations')['body'];
+same(true, in_array('bom.published', array_column($audit['tables'][2]['rows'], 'event_type'), true), 'Organization audit records the publication');
+same(false, str_contains(Value::json($audit), $password), 'The audit excludes setup passwords');
+same(200, $client->post('set-membership', ['user' => $memberId, 'role' => 'planner', 'enabled' => 0], $csrf)['status'],
+    'An administrator can revoke a previously granted role');
+same(401, $planner->get('/?page=capacity')['status'], 'Revoking the last ledger role invalidates the active session on the next request');
+
 $logout = $client->post('logout', [], $csrf);
 same(false, $logout['body']['authenticated'], 'Logout invalidates current identity');
 same(401, $client->get('/?page=sales')['status'], 'After logout protected content is inaccessible');

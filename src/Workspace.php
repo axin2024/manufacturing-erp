@@ -17,6 +17,10 @@ final class Workspace extends WorkspaceScreen
         'shipments' => ['出库交付', '↗', ['sales','warehouse','finance','quality']],
         'finance' => ['财务与月结', '¥', ['finance']],
         'jobs' => ['批量任务', '≡', ['planner','warehouse']],
+        'master' => ['主数据', '▤', []],
+        'engineering' => ['BOM 与工艺', '◇', ['planner','production']],
+        'capacity' => ['产能日历', '◷', ['planner','production']],
+        'organizations' => ['组织与审计', '▦', ['admin']],
     ];
 
     public function menu(): array
@@ -39,6 +43,8 @@ final class Workspace extends WorkspaceScreen
                 => (new OperationsWorkspace($this->db, $this->scope))->screen($page, $id, $before, $parameters),
             'finance', 'receivables', 'payables', 'bill', 'journals', 'trial', 'intercompany'
                 => (new FinanceWorkspace($this->db, $this->scope))->screen($page, $id, $before, $parameters),
+            'organizations', 'members', 'master', 'locations', 'parties', 'engineering', 'bom', 'route', 'capacity'
+                => (new SetupWorkspace($this->db, $this->scope))->screen($page, $id, $before, $parameters),
             default => throw new BusinessError('找不到此页面。', 404),
         };
         $screen['navigation'] = match ($page) {
@@ -46,6 +52,9 @@ final class Workspace extends WorkspaceScreen
             'trace' => 'inventory',
             'vendors' => 'work',
             'receivables', 'payables', 'bill', 'journals', 'trial', 'intercompany' => 'finance',
+            'members' => 'organizations',
+            'locations', 'parties' => 'master',
+            'bom', 'route' => 'engineering',
             default => $page,
         };
         return $screen;

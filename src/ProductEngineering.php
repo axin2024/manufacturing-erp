@@ -225,11 +225,21 @@ final class ProductEngineering extends Service
         $this->organizationItem($product);
         $route = $this->db->row('SELECT id,item_id,effective_on FROM routes
             WHERE org_id=? AND item_id=? AND effective_on<=? ORDER BY effective_on DESC LIMIT 1', [$this->scope->org, $product, $day]);
-        if ($route !== null) {
-            $route['steps'] = $this->db->rows('SELECT s.sequence_no,s.center_id,s.label,s.setup_minutes,s.run_seconds_per_unit,w.code
-                FROM route_steps s JOIN work_centers w ON w.id=s.center_id
-                WHERE s.org_id=? AND s.route_id=? ORDER BY s.sequence_no', [$this->scope->org, $route['id']]);
-        }
+        return $route === null ? null : $this->assembleRoute($route);
+    }
+
+    public function routeRevision(int $id): array
+    {
+        $route = $this->db->row('SELECT id,item_id,effective_on FROM routes WHERE org_id=? AND id=?', [$this->scope->org, $id]);
+        Value::assert($route !== null, '该工艺路线版本不在本账套。', 404);
+        return $this->assembleRoute($route);
+    }
+
+    private function assembleRoute(array $route): array
+    {
+        $route['steps'] = $this->db->rows('SELECT s.sequence_no,s.center_id,s.label,s.setup_minutes,s.run_seconds_per_unit,w.code
+            FROM route_steps s JOIN work_centers w ON w.id=s.center_id
+            WHERE s.org_id=? AND s.route_id=? ORDER BY s.sequence_no', [$this->scope->org, $route['id']]);
         return $route;
     }
 }
