@@ -77,7 +77,8 @@ final class Subcontracting extends Service
         $reason = Value::text($reason, 255, '费用差异处理依据');
         return $this->mutate(fn(int $org): array => $this->replay('vendor.match_fee', $key, [$feeId, $invoice, $invoiced, $date, $reason],
             function () use ($org, $feeId, $invoice, $invoiced, $date, $reason): array {
-                $fee = $this->db->row('SELECT f.*,o.work_id,o.reported_on FROM subcontract_fees f JOIN work_outputs o ON o.id=f.output_id
+                $fee = $this->db->row('SELECT f.*,o.work_id,o.reported_on,v.supplier_id FROM subcontract_fees f JOIN work_outputs o ON o.id=f.output_id
+                    JOIN subcontract_orders v ON v.id=f.subcontract_id
                     WHERE f.org_id=? AND f.id=?', [$org, $feeId]);
                 Value::assert($fee !== null, '未找到加工费记录。', 404);
                 Value::assert($fee['matched_on'] === null && $date >= $fee['reported_on'], '加工费已匹配或发票日期早于收货。', 409);
@@ -91,7 +92,16 @@ final class Subcontracting extends Service
                     $costs->record($work, 'subcontract', 'vendor_fee_difference', $feeId, $difference, 0, $date);
                     $costs->record($work, 'adjustment', 'vendor_fee_expensed', $feeId, -$difference, 0, $date);
                 }
-                $result = ['fee_id' => $feeId, 'invoiced_minor' => $invoiced, 'variance_minor' => $difference];
+                $finance = new FinanceLedger($this->db, $this->scope);
+                $lines = array_values(array_filter([
+                    $finance->line('VENDOR_ACCRUAL', (int) $fee['expected_minor']),
+                    $finance->line('VENDOR_VARIANCE', $difference),
+                    $finance->line('AP', -$invoiced),
+                ], static fn (array $row): bool => $row[2] !== 0));
+                $journal = $lines === [] ? null : $finance->post('vendor_invoice', $feeId, $date, '加工费发票 ' . $invoice, $lines);
+                $payable = $finance->openItem('ap', (int) $fee['supplier_id'], $invoice, 'vendor_invoice', $feeId, $invoiced, $date, $date);
+                $result = ['fee_id' => $feeId, 'invoiced_minor' => $invoiced, 'variance_minor' => $difference,
+                    'journal_id' => $journal, 'payable_id' => $payable];
                 $this->audit('vendor.fee_matched', $feeId, $result + ['vendor_invoice' => $invoice, 'reason' => $reason]);
                 return $result;
             }), 'finance');
@@ -130,9 +140,10 @@ final class Subcontracting extends Service
             Value::assert((int) $line['subcontract_id'] === $contract && $qty <= (int) $line['outside_milli']
                 && $date >= $line['last_posted_on'], '委外来料不是本合同可用留存量或日期早于发料。', 409);
             $r = $ledger->material((int) $line['material_id']);
-            $unit = (int) $line['unit_cost_minor'];
+            $sent = (int) $line['sent_milli'];
+            $basis = $line['basis'] === null ? Value::extendedPrice($sent, (int) $line['unit_cost_minor']) : (int) $line['basis'];
             $std = (int) $r['standard_unit_cost_minor'];
-            $amount = Value::extendedPrice($prior + $qty, $unit) - Value::extendedPrice($prior, $unit);
+            $amount = Value::allocation($basis, $prior + $qty, $sent) - Value::allocation($basis, $prior, $sent);
             $actual += $amount;
             $standard += Value::extendedPrice($prior + $qty, $std) - Value::extendedPrice($prior, $std);
             $used[$r['id']] = ($used[$r['id']] ?? 0) + $qty;

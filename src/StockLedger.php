@@ -20,7 +20,7 @@ final class StockLedger extends Service
     }
 
     public function createLot(int $item, int $location, string $lotCode, string $unit, int $sourceQty, int $unitCost,
-        string $postedOn, string $state, string $event, ?int $source, ?array $frozenConversion = null): array
+        string $postedOn, string $state, string $event, ?int $source, ?array $frozenConversion = null, ?int $exactAmount = null): array
     {
         $org = $this->scope->org;
         $this->location($location);
@@ -39,6 +39,7 @@ final class StockLedger extends Service
             VALUES (?,?,?,?,?,?,?,?,?,?,?)', [$org, $item, $lotCode, $event, $source, $unit, $sourceQty, $factor,
             $conversion['id'], $unitCost, $postedOn]);
         $movement = $this->post($lot, $location, $state, $quantity, $postedOn, $event, $source);
+        (new StockValuation($this->db, $this->scope))->acquire($lot, $quantity, $exactAmount ?? Value::extendedPrice($quantity, $unitCost));
         return ['lot_id' => $lot, 'movement_id' => $movement, 'qty_milli' => $quantity];
     }
 

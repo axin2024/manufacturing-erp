@@ -56,8 +56,8 @@ final class WorkMaterials extends Service
                     (org_id,work_id,material_id,lot_id,location_id,replacement_approval_id,overage_approval_id,qty_milli,unit_cost_minor,issued_on,actor_id)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?)', [$org, $workId, $material, $lot, $location, $substituteApproval, $overageApproval,
                         $quantity, $input['unit_cost_minor'], $day, $this->scope->user]);
+                $actual = (new StockValuation($this->db, $this->scope))->take($lot, $quantity);
                 $movement = $stock->post($lot, $location, 'available', -$quantity, $day, 'work_issue', $id);
-                $actual = Value::extendedPrice($quantity, (int) $input['unit_cost_minor']);
                 $standard = Value::extendedPrice($quantity, (int) $line['standard_unit_cost_minor']);
                 $cost = (new WorkCostLedger($this->db, $this->scope))->record($workId, 'material', 'issue', $id, $actual, $standard, $day);
                 $this->db->run('UPDATE work_materials SET issued_milli=issued_milli+? WHERE org_id=? AND id=?', [$quantity, $org, $material]);
@@ -89,10 +89,15 @@ final class WorkMaterials extends Service
                 $material = $ledger->material((int) $prior['material_id']);
                 $id = $this->db->insert('INSERT INTO work_returns (org_id,issue_id,location_id,qty_milli,received_on,actor_id)
                     VALUES (?,?,?,?,?,?)', [$org, $issue, $location, $quantity, $day, $this->scope->user]);
+                $unreturned = (int) $prior['qty_milli'] - $received;
+                $orig = $this->db->row("SELECT actual_minor FROM work_cost_entries WHERE org_id=? AND source_kind='issue'
+                    AND source_id=? AND element='material'", [$org, $issue]);
+                $basis = (int) $orig['actual_minor'];
+                $issued = (int) $prior['qty_milli'];
+                $actual = Value::allocation($basis, $unreturned, $issued) - Value::allocation($basis, $unreturned - $quantity, $issued);
+                (new StockValuation($this->db, $this->scope))->restore((int) $prior['lot_id'], $quantity, $actual);
                 $movement = (new StockLedger($this->db, $this->scope))->post((int) $prior['lot_id'], $location, 'available', $quantity,
                     $day, 'work_return', $id);
-                $unreturned = (int) $prior['qty_milli'] - $received;
-                $actual = $this->returnedAmount($unreturned, $quantity, (int) $prior['unit_cost_minor']);
                 $standard = $this->returnedAmount($unreturned, $quantity, (int) $material['standard_unit_cost_minor']);
                 $cost = (new WorkCostLedger($this->db, $this->scope))->record($workId, 'material', 'return', $id, -$actual, -$standard, $day);
                 $this->db->run('UPDATE work_issues SET returned_milli=returned_milli+? WHERE org_id=? AND id=?', [$quantity, $org, $issue]);

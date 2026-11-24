@@ -85,13 +85,16 @@ final class Completion extends Service
         $summary = $inputs = [];
         $total = 0;
         foreach ($used as $issue => $quantity) {
-            $row = $this->db->row('SELECT * FROM work_issues WHERE org_id=? AND work_id=? AND id=?', [$org, $work, $issue]);
+            $row = $this->db->row("SELECT i.*,c.actual_minor AS basis FROM work_issues i JOIN work_cost_entries c
+                ON c.org_id=i.org_id AND c.source_kind='issue' AND c.source_id=i.id AND c.element='material'
+                WHERE i.org_id=? AND i.work_id=? AND i.id=?", [$org, $work, $issue]);
             Value::assert($row !== null, '投入批次不属于本工单。', 404);
             $consumed = (int) $row['consumed_milli'];
             Value::assert($date >= $row['issued_on'] && $quantity <= (int) $row['qty_milli'] - (int) $row['returned_milli'] - $consumed,
                 '投入数量或过账日期超出领料记录允许范围。', 409);
-            $price = (int) $row['unit_cost_minor'];
-            $cost = Value::extendedPrice($consumed + $quantity, $price) - Value::extendedPrice($consumed, $price);
+            $basis = (int) $row['basis'];
+            $issued = (int) $row['qty_milli'];
+            $cost = Value::allocation($basis, $consumed + $quantity, $issued) - Value::allocation($basis, $consumed, $issued);
             $this->db->run('UPDATE work_issues SET consumed_milli=consumed_milli+? WHERE org_id=? AND id=?', [$quantity, $org, $issue]);
             $inputs[] = [$issue, (int) $row['lot_id'], $quantity, $cost];
             $summary[$row['material_id']] = ($summary[$row['material_id']] ?? 0) + $quantity;
@@ -111,15 +114,14 @@ final class Completion extends Service
     private function takeRework(int $work, int $before, int $quantity, string $date): array
     {
         $org = $this->scope->org;
-        $row = $this->db->row('SELECT r.*,l.unit_cost_minor FROM rework_inputs r JOIN stock_lots l ON l.id=r.lot_id WHERE r.org_id=? AND r.work_id=?',
+        $row = $this->db->row('SELECT * FROM rework_inputs WHERE org_id=? AND work_id=?',
             [$org, $work]);
         Value::assert($row !== null && (int) $row['consumed_milli'] === $before
             && $before + $quantity <= (int) $row['qty_milli'], '未找到足够的待返工原批次。', 409);
+        $amount = (new StockValuation($this->db, $this->scope))->take((int) $row['lot_id'], $quantity);
         (new StockLedger($this->db, $this->scope))->post((int) $row['lot_id'], (int) $row['location_id'], 'rework', -$quantity,
             $date, 'work_reworked', $work);
         $this->db->run('UPDATE rework_inputs SET consumed_milli=consumed_milli+? WHERE org_id=? AND work_id=?', [$quantity, $org, $work]);
-        $price = (int) $row['unit_cost_minor'];
-        return ['lot' => (int) $row['lot_id'],
-            'amount' => Value::extendedPrice($before + $quantity, $price) - Value::extendedPrice($before, $price)];
+        return ['lot' => (int) $row['lot_id'], 'amount' => $amount];
     }
 }

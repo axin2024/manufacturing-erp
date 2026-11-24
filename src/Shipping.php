@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ManufacturingErp;
 
+use DateTimeImmutable;
+
 final class Shipping extends Service
 {
     public function reserve(string $key, int $demand, int $lot, int $location, int $quantity): array
@@ -65,7 +67,12 @@ final class Shipping extends Service
                 foreach ($entries as $reservation => $quantity) {
                     $lines[] = $this->dispatchLine($shipment, $customer, $date, $reservation, $quantity);
                 }
-                $result = ['shipment_id' => $shipment, 'customer_id' => $customer, 'lines' => $lines];
+                $revenue = array_sum(array_column($lines, 'revenue_minor'));
+                $finance = new FinanceLedger($this->db, $this->scope);
+                $due = (new DateTimeImmutable($date))->modify('+30 days')->format('Y-m-d');
+                $open = $finance->openItem('ar', $customer, $number, 'shipment', $shipment, $revenue, $date, $due);
+                $finance->move('shipment_revenue', $shipment, $date, '销售交付 ' . $number, 'AR', 'REVENUE', $revenue);
+                $result = ['shipment_id' => $shipment, 'customer_id' => $customer, 'lines' => $lines, 'receivable_id' => $open];
                 $this->audit('shipping.dispatched', $shipment, $result);
                 return $result;
             }), 'warehouse');
@@ -116,12 +123,13 @@ final class Shipping extends Service
         $price = (int) $demand['unit_price_minor'];
         $revenue = Value::extendedPrice($after, $price) - Value::extendedPrice($before, $price);
         $stock = new StockLedger($this->db, $this->scope);
-        $value = Value::extendedPrice($quantity, (int) $stock->lot($lot)['unit_cost_minor']);
+        $value = (new StockValuation($this->db, $this->scope))->take($lot, $quantity);
         $id = $this->db->insert('INSERT INTO shipment_lines
             (org_id,shipment_id,reservation_id,lot_id,demand_id,location_id,qty_milli,revenue_minor,cogs_minor)
             VALUES (?,?,?,?,?,?,?,?,?)', [$org, $shipment, $reservation, $lot, $demand['id'], $location, $quantity, $revenue, $value]);
         $this->db->run('UPDATE stock_reservations SET remaining_milli=remaining_milli-? WHERE org_id=? AND id=?', [$quantity, $org, $reservation]);
         $movement = $stock->post($lot, $location, 'available', -$quantity, $date, 'shipment', $id);
+        (new FinanceLedger($this->db, $this->scope))->move('shipment_cost', $id, $date, '销售成本', 'COGS', 'STOCK', $value);
         $state = $after === (int) $demand['qty_milli'] ? 'fulfilled' : 'released';
         $this->db->run('UPDATE sales_demands SET dispatched_milli=?,state=? WHERE org_id=? AND id=?', [$after, $state, $org, $demand['id']]);
         $this->db->run("INSERT INTO demand_commitments (org_id,demand_id,source_kind,source_id,qty_milli,state)

@@ -18,7 +18,7 @@ final class WorkOutputLedger extends Service
             + intdiv(($actual % $quantity) * Value::SCALE + intdiv($quantity, 2), $quantity);
         $source = $work['kind'] === 'subcontract' ? 'subcontract' : 'work';
         $lot = (new StockLedger($this->db, $this->scope))->createLot((int) $work['item_id'], $location, $code,
-            $work['base_uom'], $quantity, $unitCost, $date, 'pending', 'work_output', $workId);
+            $work['base_uom'], $quantity, $unitCost, $date, 'pending', 'work_output', $workId, null, $actual);
         $id = $this->db->insert('INSERT INTO work_outputs (org_id,work_id,lot_id,location_id,qty_milli,actual_minor,standard_minor,reported_on,actor_id)
             VALUES (?,?,?,?,?,?,?,?,?)', [$org, $workId, $lot['lot_id'], $location, $quantity, $actual, $standard, $date, $this->scope->user]);
         $inspection = (new InspectionLedger($this->db, $this->scope))->register($lot['lot_id'], $location, $source, $id, $quantity);

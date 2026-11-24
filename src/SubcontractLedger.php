@@ -16,8 +16,9 @@ final class SubcontractLedger extends Service
 
     public function material(int $id): array
     {
-        $row = $this->db->row('SELECT s.*,s.sent_milli-s.used_milli-s.returned_milli-s.loss_milli AS outside_milli
-            FROM subcontract_materials s WHERE s.org_id=? AND s.id=?', [$this->scope->org, $id]);
+        $row = $this->db->row('SELECT s.*,v.amount_minor AS basis,s.sent_milli-s.used_milli-s.returned_milli-s.loss_milli AS outside_milli
+            FROM subcontract_materials s LEFT JOIN vendor_material_values v ON v.org_id=s.org_id AND v.dispatch_id=s.id
+            WHERE s.org_id=? AND s.id=?', [$this->scope->org, $id]);
         Value::assert($row !== null, '委外供料明细不存在。', 404);
         return $row;
     }

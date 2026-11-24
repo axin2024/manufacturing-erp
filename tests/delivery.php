@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use ManufacturingErp\Completion;
 use ManufacturingErp\Database;
+use ManufacturingErp\FiscalClose;
+use ManufacturingErp\GeneralLedger;
 use ManufacturingErp\Genealogy;
 use ManufacturingErp\Identity;
 use ManufacturingErp\Inspection;
@@ -158,6 +160,11 @@ same('completed', $sales->order($sale['order_id'])['state'], 'Both sales splits 
 $allImpacted = $genealogy->trace($lot2, 'downstream');
 same([$lot2, $finishedLot, $madeAgain['lot_id']], array_column($allImpacted['lots'], 'id'), 'Recall follows the rework branch');
 same(['SHP-98', 'SHP-2'], array_column($allImpacted['shipments'], 'number'), 'Recall follows both customer shipments');
+$trial = array_column((new GeneralLedger($db, $scope))->trial($later), 'net_minor', 'account_code');
+same(0, (int) $trial['WIP'], 'Finished stock and rework both clear their original work costs in the journal');
+same(244_500, (int) $trial['COGS'], 'Shipping both deliveries recognizes the entire finished lot cost exactly once');
+same(12_000, (int) $trial['STOCK'], 'Only the unused part of the original input remains capitalized');
+same('closed', (new FiscalClose($db, $scope))->close($day)['state'], 'Manufacturing subledger reconciles during period closure');
 
 $intruder = $identity->initialize('Unrelated Group ' . $instance, 'OTHER', 'Other Plant', 'CNY', 'Other Administrator',
     'other-delivery-' . $instance . '@example.test', 'Test account seed only!');

@@ -27,7 +27,10 @@ final class SubcontractMaterials extends Service
                     replacement_approval_id,overage_approval_id,sent_milli,unit_cost_minor,sent_on,last_posted_on,actor_id)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [$org, $contract, $material, $lot, $location, $replacement, $overage, $quantity,
                         $batch['unit_cost_minor'], $date, $date, $this->scope->user]);
+                $amount = (new StockValuation($this->db, $this->scope))->take($lot, $quantity);
+                $this->db->run('INSERT INTO vendor_material_values (org_id,dispatch_id,amount_minor) VALUES (?,?,?)', [$org, $id, $amount]);
                 $movement = $stock->post($lot, $location, 'available', -$quantity, $date, 'vendor_material_out', $id);
+                (new FinanceLedger($this->db, $this->scope))->move('vendor_dispatch', $id, $date, '委外发料', 'VENDOR_STOCK', 'STOCK', $amount);
                 $this->db->run('UPDATE work_materials SET issued_milli=issued_milli+? WHERE org_id=? AND id=?', [$quantity, $org, $material]);
                 $ledger->updateMaterialNeed($work, $line, $net);
                 $ledger->markStarted($work);
@@ -67,8 +70,9 @@ final class SubcontractMaterials extends Service
                     '过账须使用委外留存量，且不能早于该批次最近的委外记录。', 409);
                 $this->openPeriod($date);
                 $balance = (int) $line['sent_milli'] - (int) $line['loss_milli'] - (int) $line['returned_milli'];
-                $u = (int) $line['unit_cost_minor'];
-                $amount = Value::extendedPrice($balance, $u) - Value::extendedPrice($balance - $quantity, $u);
+                $sent = (int) $line['sent_milli'];
+                $basis = $line['basis'] === null ? Value::extendedPrice($sent, (int) $line['unit_cost_minor']) : (int) $line['basis'];
+                $amount = Value::allocation($basis, $balance, $sent) - Value::allocation($basis, $balance - $quantity, $sent);
                 if ($location !== null) {
                     $this->location($location);
                 }
@@ -76,15 +80,19 @@ final class SubcontractMaterials extends Service
                     (org_id,dispatch_id,kind,location_id,qty_milli,amount_minor,posted_on,reason,actor_id) VALUES (?,?,?,?,?,?,?,?,?)',
                     [$org, $dispatch, $kind, $location, $quantity, $amount, $date, $reason, $this->scope->user]);
                 $movement = null;
+                $finance = new FinanceLedger($this->db, $this->scope);
                 if ($location === null) {
                     $this->db->run('UPDATE subcontract_materials SET loss_milli=loss_milli+?,last_posted_on=? WHERE org_id=? AND id=?',
                         [$quantity, $date, $org, $dispatch]);
                     $costs = new WorkCostLedger($this->db, $this->scope);
                     $costs->record((int) $work['id'], 'adjustment', 'vendor_loss', $id, $amount, 0, $date);
                     $costs->record((int) $work['id'], 'adjustment', 'vendor_loss_expensed', $id, -$amount, 0, $date);
+                    $finance->move('vendor_writeoff', $id, $date, '委外损耗', 'MATERIAL_LOSS', 'VENDOR_STOCK', $amount);
                 } else {
+                    (new StockValuation($this->db, $this->scope))->restore((int) $line['lot_id'], $quantity, $amount);
                     $movement = (new StockLedger($this->db, $this->scope))->post((int) $line['lot_id'], $location, 'available', $quantity,
                         $date, 'vendor_material_return', $id);
+                    $finance->move('vendor_return', $id, $date, '委外退料', 'STOCK', 'VENDOR_STOCK', $amount);
                     $material = $ledger->material((int) $line['material_id']);
                     $this->db->run('UPDATE subcontract_materials SET returned_milli=returned_milli+?,last_posted_on=? WHERE org_id=? AND id=?',
                         [$quantity, $date, $org, $dispatch]);

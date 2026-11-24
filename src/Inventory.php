@@ -17,6 +17,8 @@ final class Inventory extends Service
             function () use ($item, $location, $lotCode, $unit, $sourceQty, $unitCost, $postedOn): array {
                 $result = (new StockLedger($this->db, $this->scope))->createLot($item, $location, $lotCode, $unit,
                     $sourceQty, $unitCost, $postedOn, 'available', 'opening', null);
+                $result['journal_id'] = (new FinanceLedger($this->db, $this->scope))->move('stock_opening', $result['lot_id'],
+                    $postedOn, '期初库存 ' . $lotCode, 'STOCK', 'OPENING_EQUITY', Value::extendedPrice($result['qty_milli'], $unitCost));
                 $this->audit('stock.opening', $result['lot_id'], $result);
                 return $result;
             }), 'warehouse');

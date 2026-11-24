@@ -52,6 +52,9 @@ abstract class Service
     protected function openPeriod(string $date): string
     {
         $period = substr(Value::day($date), 0, 7) . '-01';
+        $closed = $this->db->row("SELECT period_start FROM fiscal_periods WHERE org_id=? AND period_start>=? AND state='closed'
+            ORDER BY period_start LIMIT 1", [$this->scope->org, $period]);
+        Value::assert($closed === null, '该会计期间已关闭，请在开放期间追加调整。', 409);
         $this->db->run('INSERT INTO fiscal_periods (org_id,period_start) VALUES (?,?)
             ON DUPLICATE KEY UPDATE period_start=period_start', [$this->scope->org, $period]);
         $row = $this->db->row('SELECT state FROM fiscal_periods WHERE org_id=? AND period_start=? FOR UPDATE',

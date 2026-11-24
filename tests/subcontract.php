@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use ManufacturingErp\Database;
+use ManufacturingErp\FiscalClose;
+use ManufacturingErp\GeneralLedger;
 use ManufacturingErp\Genealogy;
 use ManufacturingErp\Identity;
 use ManufacturingErp\Inspection;
@@ -95,5 +97,10 @@ same('closed', $closing->close($id, $last)['state'], 'Work closes after reconcil
 same('closed', $closing->close($id, $last)['state'], 'Closing may be retried on the original date');
 rejects(409, fn() => $materials->returnToStock('extra-recovery', $dispatch, $warehouse, 1000, $last, 'Duplicate physical return'),
     'No movement may follow closure or exceed the expected balance');
+$trial = array_column((new GeneralLedger($db, $scope))->trial($last), 'net_minor', 'account_code');
+same(0, (int) $trial['VENDOR_STOCK'], 'Returned, consumed and lost items settle the outside custody asset');
+same(0, (int) $trial['VENDOR_ACCRUAL'], 'Matching the actual supplier invoice clears the estimated fee');
+same(-2900, (int) $trial['AP'], 'Confirmed processing fee is visible as a payable');
+same('closed', (new FiscalClose($db, $scope))->close($day)['state'], 'Vendor actual and GL balances reconcile at fiscal close');
 
 finish('Outside processing, incident reconciliation and work closing');

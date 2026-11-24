@@ -169,19 +169,22 @@ final class Purchasing extends Service
         Value::assert($remaining >= 0, '收货数量超过采购行未收数量。', 409);
         $item = (int) $line['item_id'];
         $unitPrice = (int) $line['unit_price_minor'];
-        $amount = Value::extendedPrice($after, $unitPrice) - ($prior === 0 ? 0 : Value::extendedPrice($prior, $unitPrice));
+        $amount = Value::extendedPrice($after, $unitPrice) - Value::extendedPrice($prior, $unitPrice);
         $lot = (new StockLedger($this->db, $this->scope))->createLot($item, $location, $lotCode, $line['source_uom'],
             $inputQuantity, $unitPrice, $day, 'pending', 'purchase_receipt', $receipt,
-            ['id' => $line['conversion_id'], 'factor_milli' => $line['factor_milli']]);
+            ['id' => $line['conversion_id'], 'factor_milli' => $line['factor_milli']], $amount);
         $id = $this->db->insert('INSERT INTO receipt_lines
             (org_id,receipt_id,purchase_line_id,lot_id,location_id,qty_milli,amount_minor) VALUES (?,?,?,?,?,?,?)',
             [$org, $receipt, $lineId, $lot['lot_id'], $location, $quantity, $amount]);
         $inspection = (new InspectionLedger($this->db, $this->scope))->register($lot['lot_id'], $location, 'purchase', $id, $quantity);
+        $journal = (new FinanceLedger($this->db, $this->scope))->move('purchase_receipt', $id, $day, '采购收货 ' . $lotCode,
+            'STOCK', 'GRNI', $amount);
         $this->db->run('UPDATE purchase_lines SET received_milli=? WHERE org_id=? AND id=?', [$after, $org, $lineId]);
         $links = new PlanningCommitments($this->db, $this->scope);
         $links->supply('purchase', $lineId, $item, $line['due_on'], $remaining);
         $links->state('purchase', $lineId, $remaining === 0 ? 'completed' : 'started');
-        return ['receipt_line_id' => $id, 'purchase_line_id' => $lineId, 'inspection_id' => $inspection, 'amount_minor' => $amount, ...$lot];
+        return ['receipt_line_id' => $id, 'purchase_line_id' => $lineId, 'inspection_id' => $inspection, 'amount_minor' => $amount,
+            'journal_id' => $journal, ...$lot];
     }
 
     private function validateProposal(array $line): array
