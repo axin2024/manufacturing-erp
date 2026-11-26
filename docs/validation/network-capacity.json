@@ -1,0 +1,87 @@
+{
+    "measured_at_utc": "2026-11-26T14:29:48+00:00",
+    "os": "Windows",
+    "architecture": "AMD64",
+    "cpu": "Intel64 Family 6 Model 170 Stepping 4, GenuineIntel",
+    "php": "8.2.30",
+    "php_peak_bytes": 60817408,
+    "mysql": {
+        "version": "8.4.13",
+        "buffer_pool_bytes": 134217728
+    },
+    "from": "2027-01-04",
+    "through": "2027-04-03",
+    "snapshot": {
+        "forecast_rows": 10000,
+        "lots": 9999,
+        "released_orders": 1,
+        "sites": 10,
+        "balances": 10000
+    },
+    "samples": [
+        {
+            "phase": "warmup",
+            "elapsed_ms": 505.701,
+            "scenario_id": 1,
+            "suggestions": 500
+        },
+        {
+            "phase": "measured",
+            "elapsed_ms": 384.872,
+            "scenario_id": 2,
+            "suggestions": 500
+        },
+        {
+            "phase": "measured",
+            "elapsed_ms": 291.266,
+            "scenario_id": 3,
+            "suggestions": 500
+        },
+        {
+            "phase": "measured",
+            "elapsed_ms": 283.207,
+            "scenario_id": 4,
+            "suggestions": 500
+        }
+    ],
+    "successes": 3,
+    "rejections": 0,
+    "timeouts": 0,
+    "publish_request": {
+        "scenario_id": 4,
+        "revision": 1,
+        "selected_line_ids": [
+            1501
+        ],
+        "horizon_end": "2027-04-03"
+    },
+    "publish_response": {
+        "scenario_id": 4,
+        "revision": 1,
+        "selected_line_ids": [
+            1501
+        ],
+        "transfer_ids": [
+            1
+        ],
+        "production_ids": [],
+        "blocked_lines": []
+    },
+    "published_transfers": [
+        1
+    ],
+    "released_work_before": [
+        {
+            "id": 1,
+            "state": "released",
+            "remaining_milli": 1000
+        }
+    ],
+    "released_work_after": [
+        {
+            "id": 1,
+            "state": "released",
+            "remaining_milli": 1000
+        }
+    ]
+}

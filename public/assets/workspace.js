@@ -1,5 +1,12 @@
 'use strict';
 
+for (const slider of document.querySelectorAll('input[type="range"]')) {
+    const output = slider.parentElement.querySelector('output');
+    if (output) {
+        slider.addEventListener('input', () => { output.value = slider.value; });
+    }
+}
+
 for (const group of document.querySelectorAll('[data-line-group]')) {
     const add = group.querySelector('[data-add-line]');
     const template = group.querySelector('[data-line]').cloneNode(true);

@@ -23,5 +23,6 @@ $required = $field['required'] ?? true;
             <?php foreach (['min','max','step','maxlength','autocomplete','placeholder'] as $attribute): ?>
                 <?php if (isset($field[$attribute])): ?><?= $attribute ?>="<?= WebView::e($field[$attribute]) ?>"<?php endif; ?>
             <?php endforeach; ?>>
+        <?php if ($field['type']==='range'): ?><output><?= WebView::e($field['value'] ?? 0) ?></output><?php endif; ?>
     <?php endif; ?>
 </label>

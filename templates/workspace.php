@@ -78,7 +78,7 @@ use ManufacturingErp\WebView;
         <?php foreach ($screen['forms'] as $form): ?>
             <details class="operation">
                 <summary><?= WebView::e($form['title']) ?></summary>
-                <form method="post" action="/?action=<?= WebView::e($form['action']) ?>">
+                <form method="post" action="/?action=<?= WebView::e($form['action']) ?>" <?= !empty($form['upload']) ? 'enctype="multipart/form-data"' : '' ?>>
                     <input type="hidden" name="_workbench" value="1">
                     <input type="hidden" name="_csrf" value="<?= WebView::e($csrf) ?>">
                     <?php foreach ($form['hidden'] as $key => $value): ?>

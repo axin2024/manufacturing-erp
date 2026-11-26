@@ -1,0 +1,105 @@
+{
+  "mysql": "8.4.13",
+  "backup_sha256": "182277011FAE05F73C769D3CEA026C3A6F607E80332AD79D125B34F9EB1F10F7",
+  "fresh_instance_restored": true,
+  "database_process_killed_after_commit": true,
+  "dispatch": {
+    "phase": "dispatch",
+    "transfer": 1,
+    "shipment": 1,
+    "lot": "RECOVERY-VALVES",
+    "shipped_milli": 80000
+  },
+  "receive": {
+    "phase": "receive",
+    "receipt": 1,
+    "request_key": "dock-receipt",
+    "client_response_read": false
+  },
+  "retry": {
+    "phase": "replay",
+    "input": {
+      "transfer": 1,
+      "shipment": 1,
+      "reference": "GR-078",
+      "location": 2,
+      "expected": "80",
+      "counted": "78",
+      "posted_on": "2027-01-06",
+      "reason": "Two missing at unloading",
+      "request_key": "dock-receipt"
+    },
+    "receipt": {
+      "local_ref": "GR-078",
+      "journal_id": 3,
+      "receipt_id": 1,
+      "movement_id": 3,
+      "shipment_id": 1,
+      "transfer_id": 1,
+      "variance_id": 1,
+      "amount_minor": 78000,
+      "shipment_lot": "RECOVERY-VALVES",
+      "accepted_milli": 78000,
+      "destination_lot_id": 2,
+      "url": "/?page=transit&id=1"
+    },
+    "warehouse_totals": {
+      "起运厂": "SOURCE",
+      "目的厂": "DEST",
+      "物料": "VALVE",
+      "起运料号": "VALVE",
+      "已发": "80",
+      "已收": "78",
+      "在途": "2",
+      "其中已认定盘亏": "0",
+      "可继续验收": "2",
+      "状态": "部分到货",
+      "对清日期": null,
+      "核对依据": null,
+      "确认人": null
+    },
+    "variance": {
+      "id": 1,
+      "receipt_id": 1,
+      "site_id": 2,
+      "kind": "short",
+      "qty_milli": 2000,
+      "explanation": "Two missing at unloading",
+      "shipment_id": 1,
+      "pending_milli": "2000"
+    },
+    "finance": {
+      "pair_id": 1,
+      "transfer_id": 1,
+      "currency": "CNY",
+      "shipment_lot": "RECOVERY-VALVES",
+      "dispatch_ref": "DN-080",
+      "posted_on": "2027-01-05",
+      "source_org": 1,
+      "destination_org": 2,
+      "dispatch_journal": 2,
+      "ar_minor": 80000,
+      "ap_minor": 78000,
+      "period_ar_minor": 80000,
+      "period_ap_minor": 78000,
+      "receipts": [
+        {
+          "receipt_id": 1,
+          "receipt_ref": "GR-078",
+          "receipt_journal": 3,
+          "received_on": "2027-01-06",
+          "accepted_milli": 78000,
+          "destination_lot": "TR-1-1",
+          "ap_minor": "78000"
+        }
+      ],
+      "matched_minor": 78000,
+      "remaining_minor": 2000
+    },
+    "physical": {
+      "receipts": 1,
+      "stock": "78000",
+      "movement": "78000"
+    }
+  }
+}

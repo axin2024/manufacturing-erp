@@ -7,6 +7,21 @@ namespace ManufacturingErp;
 final class WebOperations extends Service
 {
     private const RECEIPT_ROLES = [
+        'network.pilot' => ['admin'],
+        'network.qualification' => ['planner'],
+        'network.loss' => ['finance'],
+        'network.clear' => ['finance'],
+        'network.site' => ['admin'],
+        'network.lane' => ['planner'],
+        'network.forecast' => ['planner'],
+        'network.ownership' => ['admin'],
+        'network.scenario' => ['planner'],
+        'network.submit' => ['planner'],
+        'network.decide' => ['planner','production'],
+        'network.publish' => ['admin'],
+        'network.ship' => ['warehouse'],
+        'network.receive' => ['warehouse'],
+        'network.return_excess' => ['warehouse'],
         'jobs.enqueue' => ['planner','warehouse'],
         'jobs.retry_selection' => ['planner','warehouse'],
         'stock.opening' => ['warehouse'],
@@ -42,6 +57,13 @@ final class WebOperations extends Service
     public function execute(string $action, array $input): array
     {
         return match ($action) {
+            'change-network-pilot','qualify-transfer-item','create-network-site', 'map-site-item', 'set-site-calendar', 'save-network-lane',
+            'import-weekly-forecast', 'assign-demand-site', 'backfill-site-ownership', 'assign-site-ownership', 'freeze-network-plan'
+                => (new NetworkActions($this->db, $this->scope))->execute($action, $input),
+            'authorize-site-signer', 'submit-network-plan','decide-network-line','publish-network-plan'
+                => (new GroupPlanActions($this->db,$this->scope))->execute($action,$input),
+            'grant-warehouse-site','dispatch-transfer','receive-transfer','return-transfer-excess','record-transfer-loss','clear-transfer'
+                => (new TransitActions($this->db,$this->scope))->execute($action,$input),
             'freeze-sale' => $this->freezeSale($input),
             'calculate-plan' => $this->calculatePlan($input),
             'approve-plan' => $this->approvePlan($input),
@@ -80,6 +102,28 @@ final class WebOperations extends Service
             WHERE org_id=? AND actor_id=? AND kind=? AND request_key=?', [$this->scope->org, $this->scope->user, $operation, $key]);
         Value::assert($row !== null, '未找到此请求的有效回执。', 404);
         $result = Value::fromJson($row['result']);
+        if (in_array($operation,['network.ship','network.receive','network.return_excess','network.loss','network.clear'],true)) {
+            $record = (new TransferRegister($this->db,$this->scope))->detail($result['transfer_id']);
+            if ($operation === 'network.clear') {
+                $identity = new Identity($this->db);
+                foreach (array_unique([$record['source_org'],$record['destination_org']]) as $org) {
+                    Value::assert($identity->scope($this->scope->user,$org)->can('finance'),'集团对清需要双方财务权限。',403);
+                }
+            }
+        }
+        if (in_array($operation,['network.scenario','network.submit','network.publish'],true)) {
+            (new GroupScenarios($this->db,$this->scope))->detail($result['scenario_id']);
+        }
+        if ($operation === 'network.decide') {
+            $grant = $this->db->row('SELECT site_id FROM network_site_signers WHERE org_id=? AND site_id=? AND user_id=? AND enabled=1',
+                [$this->scope->org,$result['site_id'],$this->scope->user]);
+            Value::assert($grant!==null,'本厂签认授权已变更。',403);
+        }
+        if ($operation === 'network.qualification') {
+            $source = $this->db->row('SELECT s.org_id FROM network_lanes l JOIN network_sites s ON s.id=l.source_site
+                JOIN network_sites d ON d.id=l.destination_site WHERE l.id=? AND d.org_id=?',[$result['lane_id'],$this->scope->org]);
+            Value::assert($source!==null && (new Identity($this->db))->scope($this->scope->user,$source['org_id'])->can('planner'),'需要发货方计划权限。',403);
+        }
         if (in_array($operation, ['jobs.enqueue', 'jobs.retry_selection'], true)) {
             Value::assert($this->scope->can(BatchJobs::ROLES[$result['kind']]), '未找到此请求的有效回执。', 404);
         }

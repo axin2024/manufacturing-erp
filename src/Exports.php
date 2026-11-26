@@ -14,6 +14,7 @@ final class Exports extends Service
     public function open(string $kind, ?int $id = null, ?string $filter = null): array
     {
         [$columns, $rows] = match ($kind) {
+            'network-open' => $this->networkOpen(),
             'work-issues' => $this->issues($id ?? 0),
             'lot-trace' => $this->trace($id ?? 0, $filter ?? 'downstream'),
             'work-variance' => $this->variance($id ?? 0),
@@ -55,6 +56,30 @@ final class Exports extends Service
         if (fputcsv($stream, $cells, ',', '"', '', "\r\n") === false) {
             throw new RuntimeException('CSV record could not be written.');
         }
+    }
+
+    private function networkOpen(): array
+    {
+        $this->requireRole('admin');
+        $org = $this->scope->org;
+        return [['kind','id','site_id','item_id','open_milli'], $this->db->stream("SELECT 'submitted_plan' kind,l.id,g.id site_id,l.item_id,l.qty_milli open_milli
+            FROM network_plan_submissions p JOIN network_plan_lines l ON l.id=p.line_id JOIN network_sites g ON g.id IN (l.source_site,l.destination_site)
+            LEFT JOIN network_plan_executions e ON e.line_id=l.id WHERE g.org_id=? AND e.line_id IS NULL
+            UNION ALL SELECT 'dispatch_pending',t.id,s.id,t.source_item_id,t.ordered_milli-t.shipped_milli FROM network_transfer_orders t
+            JOIN network_sites s ON s.id=t.source_site WHERE s.org_id=? AND t.shipped_milli<t.ordered_milli
+            UNION ALL SELECT 'in_transit',h.id,s.id,t.item_id,h.qty_milli-h.received_milli-h.lost_milli FROM network_shipments h
+            JOIN network_transfer_orders t ON t.id=h.transfer_id JOIN network_sites s ON s.id=t.destination_site
+            WHERE s.org_id=? AND h.received_milli+h.lost_milli<h.qty_milli
+            UNION ALL SELECT v.kind,v.id,v.site_id,t.item_id,v.qty_milli-COALESCE(x.handled,0) FROM network_variances v
+            JOIN network_sites s ON s.id=v.site_id JOIN network_receipts r ON r.id=v.receipt_id
+            JOIN network_shipments h ON h.id=r.shipment_id JOIN network_transfer_orders t ON t.id=h.transfer_id
+            LEFT JOIN (SELECT variance_id,SUM(qty_milli) handled FROM network_variance_resolutions GROUP BY variance_id) x ON x.variance_id=v.id
+            WHERE s.org_id=? AND v.qty_milli>COALESCE(x.handled,0)
+            UNION ALL SELECT 'awaiting_clearance',t.id,s.id,t.item_id,0 FROM network_transfer_orders t JOIN network_sites s ON s.id=t.destination_site
+            LEFT JOIN network_clearances c ON c.transfer_id=t.id WHERE s.org_id=? AND c.transfer_id IS NULL AND t.received_milli+t.lost_milli=t.ordered_milli
+            UNION ALL SELECT 'production',w.id,m.site_id,w.item_id,GREATEST(0,CAST(w.qty_milli AS SIGNED)-CAST(w.produced_milli AS SIGNED)) FROM network_plan_executions e
+            JOIN work_orders w ON w.id=e.work_id JOIN network_work_sites m ON m.work_id=w.id WHERE w.org_id=? AND w.state NOT IN ('closed','cancelled')
+            ORDER BY kind,id,site_id",[$org,$org,$org,$org,$org,$org])];
     }
 
     private function issues(int $work): array

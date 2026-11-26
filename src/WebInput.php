@@ -30,7 +30,7 @@ final class WebInput
     public static function integer(mixed $value, string $field, int $minimum = 1, int $maximum = PHP_INT_MAX): int
     {
         $integer = is_int($value) || is_string($value) ? filter_var($value, FILTER_VALIDATE_INT) : false;
-        Value::assert($integer !== false && $integer >= $minimum && $integer <= $maximum, $field . '须为有效范围内的整数。');
+        Value::assert($integer !== false && $integer >= $minimum && $integer <= $maximum, $field . '须为有效范围内的整数。',422,$field);
         return $integer;
     }
 
@@ -95,7 +95,7 @@ final class WebInput
     public static function stringParameter(array $source, string $key, string $default = ''): string
     {
         $value = $source[$key] ?? $default;
-        Value::assert(is_string($value), '参数格式无效。');
+        Value::assert(is_string($value), '参数格式无效。',422,$key);
         return $value;
     }
 }

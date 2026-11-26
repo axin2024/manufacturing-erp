@@ -1,0 +1,332 @@
+{
+    "from_release": "v1.1.0",
+    "before": {
+        "tenant_id": 1,
+        "ownership_schema": false,
+        "organizations": [
+            {
+                "id": 1,
+                "code": "DEMO-FACTORY",
+                "currency": "CNY",
+                "ledger": {
+                    "work_orders": {
+                        "rows": 2,
+                        "sha256": "f0446e9e7acf05aee2278f4099698baa27f6b946aa539155ed7acf776e679e3f"
+                    },
+                    "stock_lots": {
+                        "rows": 6,
+                        "sha256": "51ab13c6aeeb381f3793b3493762a1614e5a08bb5bacfa12d10394f92beedecb"
+                    },
+                    "stock_balances": {
+                        "rows": 10,
+                        "sha256": "ad5d4421be523c770ea61f4f249e7e3c189e701ed6d301129beed3b29d041dfc"
+                    },
+                    "stock_lot_values": {
+                        "rows": 6,
+                        "sha256": "5ed84fee2aa9c404e470cbdcb04e3bdcc4b5a14fa300c741664a24f76de82d44"
+                    },
+                    "stock_movements": {
+                        "rows": 19,
+                        "sha256": "cf89316156545f34741acffc016d602475fdfa486f08de532a46e8ff2b10961c"
+                    },
+                    "journal_lines": {
+                        "rows": 36,
+                        "sha256": "5637f1ed05076b00ebb32a77f2e26bdd35bc28f15bfe67cf19eb7a7fb11e36ce"
+                    },
+                    "balances": [
+                        {
+                            "code": "DEVICE",
+                            "base_uom": "台",
+                            "quality": "available",
+                            "qty_milli": "0"
+                        },
+                        {
+                            "code": "DEVICE",
+                            "base_uom": "台",
+                            "quality": "pending",
+                            "qty_milli": "0"
+                        },
+                        {
+                            "code": "DEVICE",
+                            "base_uom": "台",
+                            "quality": "rework",
+                            "qty_milli": "2000"
+                        },
+                        {
+                            "code": "PIN",
+                            "base_uom": "件",
+                            "quality": "available",
+                            "qty_milli": "10000"
+                        },
+                        {
+                            "code": "PIN",
+                            "base_uom": "件",
+                            "quality": "pending",
+                            "qty_milli": "0"
+                        },
+                        {
+                            "code": "PIN-R",
+                            "base_uom": "件",
+                            "quality": "available",
+                            "qty_milli": "0"
+                        },
+                        {
+                            "code": "MODULE",
+                            "base_uom": "件",
+                            "quality": "available",
+                            "qty_milli": "0"
+                        }
+                    ],
+                    "carrying_minor": "18136"
+                },
+                "ownership": {
+                    "location": {
+                        "total": 2,
+                        "assigned": 0,
+                        "pending": [
+                            {
+                                "id": 1,
+                                "reason": "legacy_without_site"
+                            },
+                            {
+                                "id": 2,
+                                "reason": "legacy_without_site"
+                            }
+                        ]
+                    },
+                    "work": {
+                        "total": 2,
+                        "assigned": 0,
+                        "pending": [
+                            {
+                                "id": 1,
+                                "reason": "legacy_without_site"
+                            },
+                            {
+                                "id": 2,
+                                "reason": "legacy_without_site"
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": 2,
+                "code": "DEMO-TRADE",
+                "currency": "CNY",
+                "ledger": {
+                    "work_orders": {
+                        "rows": 0,
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "stock_lots": {
+                        "rows": 0,
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "stock_balances": {
+                        "rows": 0,
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "stock_lot_values": {
+                        "rows": 0,
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "stock_movements": {
+                        "rows": 0,
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "journal_lines": {
+                        "rows": 0,
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "balances": [],
+                    "carrying_minor": "0"
+                },
+                "ownership": {
+                    "location": {
+                        "total": 0,
+                        "assigned": 0,
+                        "pending": []
+                    },
+                    "work": {
+                        "total": 0,
+                        "assigned": 0,
+                        "pending": []
+                    }
+                }
+            }
+        ]
+    },
+    "after": {
+        "tenant_id": 1,
+        "ownership_schema": true,
+        "organizations": [
+            {
+                "id": 1,
+                "code": "DEMO-FACTORY",
+                "currency": "CNY",
+                "ledger": {
+                    "work_orders": {
+                        "rows": 2,
+                        "sha256": "f0446e9e7acf05aee2278f4099698baa27f6b946aa539155ed7acf776e679e3f"
+                    },
+                    "stock_lots": {
+                        "rows": 6,
+                        "sha256": "51ab13c6aeeb381f3793b3493762a1614e5a08bb5bacfa12d10394f92beedecb"
+                    },
+                    "stock_balances": {
+                        "rows": 10,
+                        "sha256": "ad5d4421be523c770ea61f4f249e7e3c189e701ed6d301129beed3b29d041dfc"
+                    },
+                    "stock_lot_values": {
+                        "rows": 6,
+                        "sha256": "5ed84fee2aa9c404e470cbdcb04e3bdcc4b5a14fa300c741664a24f76de82d44"
+                    },
+                    "stock_movements": {
+                        "rows": 19,
+                        "sha256": "cf89316156545f34741acffc016d602475fdfa486f08de532a46e8ff2b10961c"
+                    },
+                    "journal_lines": {
+                        "rows": 36,
+                        "sha256": "5637f1ed05076b00ebb32a77f2e26bdd35bc28f15bfe67cf19eb7a7fb11e36ce"
+                    },
+                    "balances": [
+                        {
+                            "code": "DEVICE",
+                            "base_uom": "台",
+                            "quality": "available",
+                            "qty_milli": "0"
+                        },
+                        {
+                            "code": "DEVICE",
+                            "base_uom": "台",
+                            "quality": "pending",
+                            "qty_milli": "0"
+                        },
+                        {
+                            "code": "DEVICE",
+                            "base_uom": "台",
+                            "quality": "rework",
+                            "qty_milli": "2000"
+                        },
+                        {
+                            "code": "PIN",
+                            "base_uom": "件",
+                            "quality": "available",
+                            "qty_milli": "10000"
+                        },
+                        {
+                            "code": "PIN",
+                            "base_uom": "件",
+                            "quality": "pending",
+                            "qty_milli": "0"
+                        },
+                        {
+                            "code": "PIN-R",
+                            "base_uom": "件",
+                            "quality": "available",
+                            "qty_milli": "0"
+                        },
+                        {
+                            "code": "MODULE",
+                            "base_uom": "件",
+                            "quality": "available",
+                            "qty_milli": "0"
+                        }
+                    ],
+                    "carrying_minor": "18136"
+                },
+                "ownership": {
+                    "location": {
+                        "total": 2,
+                        "assigned": 2,
+                        "pending": []
+                    },
+                    "work": {
+                        "total": 2,
+                        "assigned": 2,
+                        "pending": []
+                    }
+                }
+            },
+            {
+                "id": 2,
+                "code": "DEMO-TRADE",
+                "currency": "CNY",
+                "ledger": {
+                    "work_orders": {
+                        "rows": 0,
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "stock_lots": {
+                        "rows": 0,
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "stock_balances": {
+                        "rows": 0,
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "stock_lot_values": {
+                        "rows": 0,
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "stock_movements": {
+                        "rows": 0,
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "journal_lines": {
+                        "rows": 0,
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "balances": [],
+                    "carrying_minor": "0"
+                },
+                "ownership": {
+                    "location": {
+                        "total": 0,
+                        "assigned": 0,
+                        "pending": []
+                    },
+                    "work": {
+                        "total": 0,
+                        "assigned": 0,
+                        "pending": []
+                    }
+                }
+            }
+        ]
+    },
+    "backfill": [
+        {
+            "org_id": 1,
+            "kind": "location",
+            "assigned_ids": [
+                1,
+                2
+            ],
+            "last_id": 2
+        },
+        {
+            "org_id": 1,
+            "kind": "work",
+            "assigned_ids": [
+                1,
+                2
+            ],
+            "last_id": 2
+        },
+        {
+            "org_id": 2,
+            "kind": "location",
+            "assigned_ids": [],
+            "last_id": 0
+        },
+        {
+            "org_id": 2,
+            "kind": "work",
+            "assigned_ids": [],
+            "last_id": 0
+        }
+    ],
+    "verified_assertions": 32
+}

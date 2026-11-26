@@ -8,6 +8,7 @@ final class FinanceLedger extends Service
 {
     public const MAX_AMOUNT = 1_000_000_000_000_000;
     public const ACCOUNTS = [
+        'FACTORY_TRANSIT' => '同法人跨厂在途存货', 'TRANSFER_MARGIN' => '内部转移价差',
         'BANK' => '银行存款', 'AR' => '应收账款', 'STOCK' => '存货', 'VENDOR_STOCK' => '委外在途物料',
         'WIP' => '在制品', 'DUE_FROM' => '应收集团往来', 'AP' => '应付账款', 'GRNI' => '收货暂估应付',
         'VENDOR_ACCRUAL' => '委外暂估应付', 'DUE_TO' => '应付集团往来',

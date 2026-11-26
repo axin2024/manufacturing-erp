@@ -17,6 +17,7 @@ $command = $argv[1] ?? 'help';
 if ($command === 'help') {
     echo <<<'HELP'
     php bin/erp.php migrate
+    php bin/erp.php network-preflight <集团编号>
     php bin/erp.php health
     php bin/erp.php init <集团名称> <法人编码> <法人名称> <本位币> <管理员名称> <邮箱>
     php bin/erp.php worker [--once|--drain]
@@ -32,6 +33,11 @@ try {
     $db = Database::connect();
     $migrations = new Migrations($db, dirname(__DIR__) . '/database/migrations');
     switch ($command) {
+        case 'network-preflight':
+            Value::assert(count($argv)===3,'请指定一个集团编号。');
+            $tenant = ManufacturingErp\WebInput::integer($argv[2],'集团编号');
+            echo Value::json((new ManufacturingErp\NetworkPreflight($db))->inspect($tenant))."\n";
+            break;
         case 'migrate':
             $applied = $migrations->migrate();
             echo $applied === [] ? "Schema is current.\n" : 'Applied: ' . implode(', ', $applied) . "\n";

@@ -28,10 +28,11 @@ final class Value
         return $value;
     }
 
-    public static function day(string $value): string
+    public static function day(string $value, ?string $field = null): string
     {
+        self::assert((bool)preg_match('/\A[0-9]{4}-[0-9]{2}-[0-9]{2}\z/',$value),'日期格式无效。',422,$field);
         $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
-        self::assert($date !== false && $date->format('Y-m-d') === $value && $value >= '1000-01-01', '日期格式无效。');
+        self::assert($date !== false && $date->format('Y-m-d') === $value && $value >= '1000-01-01', '日期格式无效。',422,$field);
         return $value;
     }
 
@@ -106,10 +107,10 @@ final class Value
         return $decoded;
     }
 
-    public static function assert(bool $ok, string $message, int $status = 422): void
+    public static function assert(bool $ok, string $message, int $status = 422, ?string $field = null): void
     {
         if (!$ok) {
-            throw new BusinessError($message, $status);
+            throw new BusinessError($message, $status, $field);
         }
     }
 }

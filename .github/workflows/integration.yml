@@ -33,7 +33,7 @@ jobs:
           docker compose exec -T web php bin/erp.php migrate
           docker compose exec -T web php bin/erp.php health
           docker compose exec -T web sh -e -c 'find bin src templates public examples tests -name "*.php" -print0 | xargs -0 -n 1 php -l'
-          for suite in planning-purchasing workshop delivery subcontract finance batch-jobs demo capacity extensions http-workspace; do
+          for suite in planning-purchasing workshop delivery subcontract finance batch-jobs demo capacity extensions network network-capacity http-workspace; do
             docker compose exec -T -e ERP_TEST_DATABASE=1 -e ERP_HTTP_URL=http://127.0.0.1:80 web php "tests/$suite.php"
           done
           docker compose start worker

@@ -6,10 +6,17 @@ namespace ManufacturingErp;
 
 final class Workspace extends WorkspaceScreen
 {
+    private const PILOT_PAGES = ['forecasts','scenarios','plant-inbox','transit','eliminations'];
     private const MENU = [
         'home' => ['工作台', '▦', []],
         'sales' => ['销售与交付', '↗', ['sales','planner','warehouse','finance']],
         'planning' => ['物料计划', '◇', ['planner','buyer','production']],
+        'network' => ['工厂运输网络', '↔', ['planner','warehouse']],
+        'forecasts' => ['周预测与订单消耗', '▤', ['planner','sales']],
+        'scenarios' => ['集团供需情景', '◇', ['planner']],
+        'plant-inbox' => ['分厂产能签认', '✓', ['planner','production']],
+        'transit' => ['跨厂在途台账', '↔', ['warehouse','planner','finance']],
+        'eliminations' => ['集团往来抵销', '¥', ['finance']],
         'purchases' => ['采购', '▤', ['buyer','planner','warehouse','finance']],
         'inventory' => ['批次库存', '□', ['warehouse','planner','buyer','production','quality','finance']],
         'work' => ['制造与委外', '⚙', ['planner','production','warehouse','quality','finance','buyer']],
@@ -25,15 +32,29 @@ final class Workspace extends WorkspaceScreen
 
     public function menu(): array
     {
-        return array_filter(self::MENU, fn(array $entry): bool => $entry[2] === [] || $this->scope->can(...$entry[2]));
+        $pages = self::MENU;
+        if ((new NetworkPilot($this->db,$this->scope))->current()['state']==='setup') {
+            $pages = array_diff_key($pages,array_flip(self::PILOT_PAGES));
+        }
+        return array_filter($pages, fn(array $entry): bool => $entry[2] === [] || $this->scope->can(...$entry[2]));
     }
 
     public function screen(string $page, array $parameters): array
     {
+        if (in_array($page,self::PILOT_PAGES,true)) {
+            Value::assert((new NetworkPilot($this->db,$this->scope))->current()['state']!=='setup','此集团尚未启用多厂业务。',404);
+        }
         $id = isset($parameters['id']) ? WebInput::integer($parameters['id'], '对象编号') : null;
         $before = isset($parameters['before']) ? WebInput::integer($parameters['before'], '分页游标') : PHP_INT_MAX;
         $screen = match ($page) {
             'home' => $this->home($parameters),
+            'network' => (new NetworkWorkspace($this->db, $this->scope))->sites($parameters),
+            'network-ownership' => (new NetworkWorkspace($this->db, $this->scope))->ownership(),
+            'forecasts' => (new NetworkWorkspace($this->db, $this->scope))->forecasts($id, $before),
+            'scenarios' => (new GroupPlanWorkspace($this->db, $this->scope))->screen($id, $before, $parameters),
+            'plant-inbox' => (new GroupPlanWorkspace($this->db, $this->scope))->inbox(),
+            'transit' => (new TransitWorkspace($this->db,$this->scope))->screen($id,$before),
+            'eliminations' => (new TransitWorkspace($this->db,$this->scope))->finance($id,$parameters),
             'sales' => (new SalesWorkspace($this->db, $this->scope))->screen($id, $before, WebInput::optionalId($parameters, 'demand')),
             'planning' => $this->planning($id, $before, WebInput::stringParameter($parameters, 'ref'),
                 WebInput::stringParameter($parameters, 'after'), WebInput::stringParameter($parameters, 'diff_after')),
@@ -53,6 +74,7 @@ final class Workspace extends WorkspaceScreen
             'vendors' => 'work',
             'receivables', 'payables', 'bill', 'journals', 'trial', 'intercompany' => 'finance',
             'members' => 'organizations',
+            'network-ownership' => 'network',
             'locations', 'parties' => 'master',
             'bom', 'route' => 'engineering',
             default => $page,

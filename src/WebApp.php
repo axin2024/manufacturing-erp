@@ -29,6 +29,17 @@ final class WebApp
             $this->page = WebInput::stringParameter($_GET, 'page', 'home');
             $this->action = WebInput::stringParameter($_GET, 'action');
             $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+            $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+            $planId = null;
+            if (preg_match('~^/network-plans/([1-9][0-9]*)/publish$~D', $path, $match)) {
+                $this->json = true;
+                header('Allow: POST');
+                Value::assert($method==='POST','此接口只接受 POST。',405);
+                $this->action = 'publish-network-plan';
+                $planId = WebInput::integer($match[1],'情景编号');
+            } else {
+                Value::assert(in_array($path,['/','/index.php'],true),'找不到此页面。',404);
+            }
             if (!in_array($method, ['GET','HEAD','POST'], true)) {
                 header('Allow: GET, HEAD, POST');
                 throw new BusinessError('请求方法不受支持。', 405);
@@ -36,7 +47,12 @@ final class WebApp
             $db = Database::connect();
             $this->session = new WebSession($db);
             if ($method === 'POST') {
-                $this->post($db, WebInput::posted());
+                $input = WebInput::posted();
+                if ($planId !== null) {
+                    $input['scenario'] = $planId;
+                    $input['request_key'] = $_SERVER['HTTP_IDEMPOTENCY_KEY'] ?? $input['request_key'] ?? '';
+                }
+                $this->post($db, $input);
             } else {
                 $this->get($db);
             }
@@ -44,7 +60,7 @@ final class WebApp
             if ($error->status === 429) {
                 header('Retry-After: ' . (900 - time() % 900));
             }
-            $this->error($error->getMessage(), $error->status);
+            $this->error($error->getMessage(), $error->status,$error->field);
         } catch (Throwable $error) {
             $ref = bin2hex(random_bytes(6));
             error_log('ERP request ' . $ref . ' failed (' . $error::class . ':' . $error->getCode() . ' at ' . basename($error->getFile()) . ':' . $error->getLine() . ')');
@@ -171,10 +187,10 @@ final class WebApp
         }
     }
 
-    private function error(string $message, int $status): void
+    private function error(string $message, int $status, ?string $field = null): void
     {
         if ($this->json) {
-            $this->respond(['error' => $message, 'status' => $status], $status);
+            $this->respond(['error' => $message, 'status' => $status]+($field===null?[]:['field'=>$field]), $status);
             return;
         }
         $template = $this->action === 'login' || ($status === 401 && $this->session !== null) ? 'login' : 'error';
