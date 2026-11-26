@@ -3,14 +3,13 @@
   "platform": "Windows",
   "php": "8.2.30",
   "mysql": "8.4.13",
-  "previous_commit": "f10c9b445ad1244a85de78834e4457cc3ea643a4",
-  "tested_application_commit": "44db37795f4c4ccdb2f15b75a1a59da1bad2de58",
+  "previous_version": "v1.0.0",
+  "previous_commit": "04f9ed29db3f2b1a49f91886aa14debd6663a4c9",
   "migrations": [
-    "013_extension_versions",
-    "014_external_receipt_jobs"
+    "015_approval_delegations"
   ],
-  "backup_bytes": 153443,
-  "backup_sha256": "ea886964f0542c9d0c7dde0b8e57ec58caf29ebdf4b82d0cc7cbe39e80d57a7d",
+  "backup_bytes": 155349,
+  "backup_sha256": "2f16a8d1edda9267f8391cbe0754e2c0eb3c0816005aae9024e0c8d2327e9fb4",
   "same_on_upgrade_and_restore": true,
   "facts": {
     "org_count": 2,

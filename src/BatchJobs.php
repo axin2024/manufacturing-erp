@@ -75,13 +75,58 @@ final class BatchJobs extends Service
             foreach ($rows as $no => $line) {
                 Value::assert((int) $line['attempts'] < 100, '任务行已达尝试次数上限，请另建新任务。', 409);
                 $payload = array_key_exists($no, $corrections) ? Value::json($corrections[$no]) : $line['payload'];
-                $this->db->run("UPDATE batch_rows SET payload=?,executor_id=?,state='pending',error_text=NULL,result=NULL WHERE org_id=? AND id=?",
-                    [$payload, $this->scope->user, $org, $line['id']]);
+                $this->resetRow($org, (int) $line['id'], $payload);
             }
             $this->db->run("UPDATE batch_jobs SET state='queued' WHERE org_id=? AND id=?", [$org, $id]);
             $this->audit('jobs.requeued', $id, ['row_numbers' => array_keys($rows), 'corrected_rows' => array_keys($corrections)]);
             return ['job_id' => $id, 'state' => 'queued', 'requeued_rows' => count($rows)];
         }, $role);
+    }
+
+    public function retrySelection(int $id, string $key, array $selection): array
+    {
+        $role = self::ROLES[$this->job($id)['kind']];
+        Value::assert(array_is_list($selection) && count($selection) >= 1 && count($selection) <= 100, '请选择 1 至 100 个任务行。');
+        foreach ($selection as $row) {
+            Value::assert(is_int($row) && $row >= 1, '重试行号无效。');
+        }
+        $selection = array_values(array_unique($selection));
+        sort($selection, SORT_NUMERIC);
+        return $this->mutate(fn(int $org): array => $this->replay('jobs.retry_selection', $key, [$id, $selection],
+            fn(): array => $this->requeueRows($org, $id, $selection)), $role);
+    }
+
+    private function requeueRows(int $org, int $id, array $selection): array
+    {
+        $job = $this->job($id);
+        $placeholders = implode(',', array_fill(0, count($selection), '?'));
+        $rows = array_column($this->db->rows("SELECT id,row_no,payload,state,attempts FROM batch_rows
+            WHERE org_id=? AND job_id=? AND row_no IN ($placeholders)", [$org, $id, ...$selection]), null, 'row_no');
+        $outcomes = [];
+        $queued = 0;
+        foreach ($selection as $row) {
+            $line = $rows[$row] ?? null;
+            $reason = match (true) {
+                $line === null => '行号不存在。',
+                $job['state'] === 'cancelled' => '任务已取消。',
+                !in_array($line['state'], ['rejected', 'retryable'], true) => '当前状态不允许重试。',
+                (int) $line['attempts'] >= 100 => '已达重试上限。',
+                default => null,
+            };
+            if ($reason === null) {
+                $this->resetRow($org, (int) $line['id'], $line['payload']);
+                $queued++;
+            }
+            $outcomes[] = ['row_no' => $row, 'outcome' => $reason === null ? 'requeued' : 'skipped',
+                'previous_state' => $line['state'] ?? null, 'reason' => $reason];
+        }
+        if ($queued > 0) {
+            $this->db->run("UPDATE batch_jobs SET state='queued' WHERE org_id=? AND id=?", [$org, $id]);
+        }
+        $result = ['job_id' => $id, 'kind' => $job['kind'], 'state' => $queued > 0 ? 'queued' : $job['state'],
+            'requeued_rows' => $queued, 'rows' => $outcomes];
+        $this->audit('jobs.selection_requeued', $id, $result);
+        return $result;
     }
 
     public function cancel(int $id): array
@@ -165,6 +210,12 @@ final class BatchJobs extends Service
             WHERE j.org_id=? AND j.id=?', [$this->scope->org, $id]);
         Value::assert($job !== null, '批任务不存在。', 404);
         return $job;
+    }
+
+    private function resetRow(int $org, int $id, string $payload): void
+    {
+        $this->db->run("UPDATE batch_rows SET payload=?,executor_id=?,state='pending',error_text=NULL,result=NULL WHERE org_id=? AND id=?",
+            [$payload, $this->scope->user, $org, $id]);
     }
 
     private function checkPayload(mixed $row): void

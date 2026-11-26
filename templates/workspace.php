@@ -16,6 +16,13 @@ use ManufacturingErp\WebView;
 <?php endif; ?>
 <?php if (isset($screen['notification'])): ?>
     <p class="alert" role="status"><?= WebView::e($screen['notification']['message']) ?></p>
+    <?php if (($screen['notification']['details'] ?? []) !== []): ?>
+        <ul aria-label="选中行的处理结果">
+            <?php foreach ($screen['notification']['details'] as $detail): ?>
+                <li><?= WebView::e($detail) ?></li>
+            <?php endforeach; ?>
+        </ul>
+    <?php endif; ?>
 <?php endif; ?>
 <?php if (($screen['filters'] ?? []) !== []): ?>
     <form class="filters" method="get" action="/">

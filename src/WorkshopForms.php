@@ -59,9 +59,6 @@ final class WorkshopForms extends WorkspaceScreen
         $state = $work['state'];
         $id = (int) $work['id'];
         $forms = [];
-        if ($state === 'draft' && $this->scope->can('planner')) {
-            $forms[] = $this->form('批准工单', 'approve-work', [], ['id' => $id], '批准后可预留产能或关联委外加工单。');
-        }
         if ($state === 'approved' && $this->scope->can('planner', 'production')) {
             $ready = $work['kind'] === 'subcontract' ? $hasContract
                 : array_filter($work['operations'], static fn(array $row): bool => $row['slot_id'] === null) === [];

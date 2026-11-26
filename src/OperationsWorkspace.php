@@ -298,11 +298,13 @@ final class OperationsWorkspace extends WorkspaceScreen
         $issueBefore = isset($parameters['issue_before']) ? WebInput::integer($parameters['issue_before'], '领料分页游标') : PHP_INT_MAX;
         $costBefore = isset($parameters['cost_before']) ? WebInput::integer($parameters['cost_before'], '成本分页游标') : PHP_INT_MAX;
         $this->workLedgerTables($id, $issueBefore, $costBefore, $tables, $links);
-        return ['title' => $record['number'], 'parent' => ['work', '生产工单'], 'links' => $links, 'forms' => $actions->forOrder($record, $hasContract),
+        $approval = (new ApprovalWorkspace($this->db, $this->scope))->controls('work', $id, '批准后可预留产能或关联委外加工单。');
+        return ['title' => $record['number'], 'parent' => ['work', '生产工单'], 'links' => $links,
+            'forms' => [...$approval['forms'], ...$actions->forOrder($record, $hasContract)],
             'details' => ['物料' => $record['item_code'] . ' ' . $record['item_name'], '状态' => WebView::state($record['state']),
                 '工单类型' => WebView::state($record['kind']), 'BOM 版本' => $record['bom_id'], '工艺版本' => $record['route_id'],
                 '工单人工与制造费用分摊' => $record['kind'] === 'subcontract' ? null : ($record['cost_policy_version'] ?? Extensions::ALLOCATION_DEFAULT),
-                '计划开工' => $record['starts_on'], '计划完成' => $record['due_on'], '来源建议' => $record['proposal_id']],
+                '计划开工' => $record['starts_on'], '计划完成' => $record['due_on'], '来源建议' => $record['proposal_id']] + $approval['details'],
             'tables' => $tables];
     }
 

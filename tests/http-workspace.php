@@ -8,6 +8,7 @@ use ManufacturingErp\DemoScenario;
 use ManufacturingErp\Identity;
 use ManufacturingErp\Inventory;
 use ManufacturingErp\MasterData;
+use ManufacturingErp\Planning;
 use ManufacturingErp\ProductEngineering;
 use ManufacturingErp\Scheduling;
 use ManufacturingErp\Value;
@@ -319,6 +320,41 @@ same(null, $worker->next(), 'The receipt job finishes once and a cancelled job s
 $wrongWatchId = $client->post('watch-receipt', [...$notice, 'id' => $stock['planned_order_id'], 'request_key' => 'notice-wrong-order'], $csrf)['body']['job_id'];
 same('rejected', $worker->next()['state'], 'A notice cannot silently settle a different purchase order');
 same('失败', $client->get('/?page=jobs&id=' . $wrongWatchId)['body']['details']['状态'], 'Mismatched notice is visible as a failed job');
+
+$validItem = ['code' => 'SELECT-GOOD', 'name' => 'Good row', 'uom' => 'ea', 'sourcing' => 'purchase', 'standard_cost_minor' => 100, 'lead_days' => 1];
+$badItem = ['lead_days' => 'invalid'] + $validItem;
+$batch = $client->post('enqueue-job', ['kind' => 'items', 'request_key' => 'items-selected-retry', 'rows' => [
+    $validItem, ['code' => 'SELECT-SECOND'] + $badItem, ['code' => 'SELECT-THIRD'] + $badItem, ['code' => 'SELECT-FOURTH'] + $badItem,
+]], $csrf)['body']['job_id'];
+for ($index = 0; $index < 4; $index++) {
+    $worker->next();
+}
+$batchUrl = '/?page=jobs&id=' . $batch;
+same(true, str_contains($client->get($batchUrl, false)['body'], 'name="rows[]"'), 'Batch detail has a multiple selection for retryable rows');
+$retry = ['id' => $batch, 'request_key' => 'selected-retry-receipt', 'rows' => [4, 2, 1, 4, 99]];
+$client->submitAndDropResponse('retry-job-selection', $retry, $csrf,
+    fn(): bool => $db->row("SELECT 1 FROM operation_receipts WHERE org_id=? AND kind='jobs.retry_selection' AND request_key=?",
+        [$scope->org, $retry['request_key']]) !== null);
+$retryReceipt = $client->get('/?page=receipt&operation=jobs.retry_selection&request_key=' . $retry['request_key'])['body']['result'];
+same(2, $retryReceipt['requeued_rows'], 'Lost HTTP response can be recovered for exactly the two eligible selected rows');
+same([1, 2, 4, 99], array_column($retryReceipt['rows'], 'row_no'), 'Durable receipt deduplicates and lists the complete selection');
+same(['skipped', 'requeued', 'requeued', 'skipped'], array_column($retryReceipt['rows'], 'outcome'), 'Receipt reports each accepted and skipped line');
+same('行号不存在。', $retryReceipt['rows'][3]['reason'], 'Missing row includes the specific rejection reason');
+same(['succeeded', 'pending', 'rejected', 'pending'], array_column($client->get($batchUrl)['body']['tables'][0]['rows'], 'state'),
+    'Selected retry does not modify previously successful or unselected failed rows');
+$worker->next();
+$worker->next();
+$retryForm = $client->submit('retry-job-selection', $retry, $csrf);
+same(303, $retryForm['status'], 'Replaying the browser form lands on the same job');
+$retryHtml = $client->get($retryForm['headers']['location'], false)['body'];
+same(true, str_contains($retryHtml, '第 99 行 · 行号不存在。'), 'Browser shows the skipped selection with its reason');
+same($retryReceipt, $client->get('/?page=receipt&operation=jobs.retry_selection&request_key=' . $retry['request_key'])['body']['result'],
+    'Retrying with the original key returns the original result after both selected rows fail again');
+same([1, 2, 1, 2], array_column($client->get($batchUrl)['body']['tables'][0]['rows'], 'attempts'),
+    'The worker executed the two chosen rows only once more');
+same(409, $client->post('retry-job-selection', ['rows' => [3]] + $retry, $csrf)['status'], 'Same request key rejects a changed selection');
+same(null, $worker->next(), 'Duplicate response recovery does not re-enqueue rows');
+
 $receivedLines = $client->get('/?page=inbound&id=' . $receiptId)['body']['tables'][0]['rows'];
 same([1125, 2375], array_column($receivedLines, 'pending_milli'), 'Each confirmed batch has its own pending inspection');
 $inspectId = $receivedLines[0]['inspection_id'];
@@ -612,8 +648,63 @@ $route = $planner->post('publish-route', ['item' => $product, 'effective_on' => 
 same(2, $planner->get($route['url'])['body']['tables'][0]['rows'][0]['setup_minutes'], 'Route detail shows standard preparation time');
 $pilotWork = $planner->post('create-work', ['item' => $product, 'quantity' => '2', 'number' => 'WO-PILOT', 'engineering_on' => $day,
     'starts_on' => $day, 'due_on' => $day, 'request_key' => 'http-pilot-work'], $plannerCsrf)['body']['work_id'];
-$planner->post('approve-work', ['id' => $pilotWork], $plannerCsrf);
 $workUrl = '/?page=work&id=' . $pilotWork;
+$delegateEmail = 'workspace-delegate-' . $tag . '@example.test';
+$delegateId = $client->post('add-member', ['name' => 'Pilot buyer', 'email' => $delegateEmail, 'password' => $password, 'role' => 'buyer'],
+    $csrf)['body']['user_id'];
+$delegate = new WebTestClient($base);
+$delegateCsrf = $delegate->post('login', ['email' => $delegateEmail, 'password' => $password],
+    $delegate->get('/?page=session')['body']['csrf'])['body']['csrf'];
+$delegatedApproval = ['id' => $pilotWork, 'acting_for' => '1'];
+$assignment = ['id' => $pilotWork, 'kind' => 'work', 'delegate_id' => $delegateId, 'hours' => '24'];
+same(403, $delegate->post('approve-work', ['id' => $pilotWork], $delegateCsrf)['status'], 'Object access never gives the buyer direct approval');
+same(403, $delegate->post('approve-work', $delegatedApproval, $delegateCsrf)['status'], 'An unassigned buyer cannot submit a delegated approval');
+same(403, $planner->post('delegate-approval', ['delegate_id' => $external['user']] + $assignment, $plannerCsrf)['status'],
+    'Planner cannot assign an unrelated account');
+same(403, $delegate->post('delegate-approval', ['delegate_id' => $memberId] + $assignment, $delegateCsrf)['status'],
+    'Buyer cannot redelegate an approval');
+same(200, $planner->post('delegate-approval', $assignment, $plannerCsrf)['status'], 'Planner delegates a draft work order for 24 hours');
+same('Pilot buyer', $db->row('SELECT u.name FROM approval_delegations d JOIN users u ON u.id=d.assigned_to
+    WHERE d.org_id=? AND d.kind=? AND d.object_id=?', [$pilot, 'work', $pilotWork])['name'], 'The assignment is durable in MySQL');
+$inbox = $delegate->get('/?page=home')['body']['tables'][0];
+same($workUrl, $inbox['rows'][0]['_links']['id'], 'Personal workbench links to the original delegated document');
+same(true, str_contains($delegate->get($workUrl, false)['body'], '代办批准'), 'Assigned operator can open the delegated approval form');
+same(false, str_contains($delegate->get($workUrl, false)['body'], $delegateEmail), 'Delegation does not expose account email addresses');
+same(404, $other->get($workUrl)['status'], 'An unrelated tenant cannot read the delegated order');
+same(403, $other->post('approve-work', $delegatedApproval, $other->get('/?page=session')['body']['csrf'])['status'],
+    'An unrelated tenant cannot act on a delegated order');
+same(200, $planner->post('revoke-approval', $assignment, $plannerCsrf)['status'], 'Planner can withdraw a pending delegation');
+same(403, $delegate->post('approve-work', $delegatedApproval, $delegateCsrf)['status'], 'Withdrawn delegation denies further approval');
+same([], $delegate->get('/?page=home')['body']['tables'], 'Withdrawn assignment disappears from the inbox');
+$planner->post('delegate-approval', $assignment, $plannerCsrf);
+$db->run("UPDATE approval_delegations SET expires_at=UTC_TIMESTAMP(6)-INTERVAL 1 SECOND WHERE org_id=? AND kind='work' AND object_id=?", [$pilot, $pilotWork]);
+same(403, $delegate->post('approve-work', $delegatedApproval, $delegateCsrf)['status'], 'Expired assignment denies approval without a cleanup job');
+same('已失效', $delegate->get($workUrl)['body']['details']['委托状态'], 'Expired assignment can still be read on the original document');
+$planner->post('delegate-approval', $assignment, $plannerCsrf);
+same(303, $delegate->submit('approve-work', $delegatedApproval, $delegateCsrf)['status'], 'Delegated approval submits through the HTML endpoint');
+same('已代办', $delegate->get($workUrl)['body']['details']['委托状态'], 'Document retains the completed assignment');
+same(403, $delegate->post('approve-work', $delegatedApproval, $delegateCsrf)['status'], 'An accepted delegation cannot be executed again');
+$approvedEvent = $db->row("SELECT actor_id,details FROM audit_events WHERE org_id=? AND event_type='work.approved' AND entity_id=?", [$pilot, $pilotWork]);
+same($delegateId, (int) $approvedEvent['actor_id'], 'Audit records the signed-in buyer as the actual decision maker');
+same($memberId, Value::fromJson($approvedEvent['details'])['delegated_by'], 'Audit separately identifies the delegating planner');
+same(403, $delegate->post('release-work', ['id' => $pilotWork], $delegateCsrf)['status'], 'Delegation does not grant releasing or other planner actions');
+
+$pilotPlanning = new Planning($db, $identity->scope($memberId, $pilot));
+$firstPlan = $pilotPlanning->calculate('pilot-delegate-first', $day, $day, Planning::POLICY)['run_id'];
+$planner->post('delegate-approval', ['id' => $firstPlan, 'kind' => 'plan'] + $assignment, $plannerCsrf);
+$latestPlan = $pilotPlanning->calculate('pilot-delegate-latest', $day, $day, Planning::POLICY)['run_id'];
+same([], $delegate->get('/?page=home')['body']['tables'], 'A new MRP run removes an obsolete approval from the inbox');
+same(409, $delegate->post('approve-plan', ['id' => $firstPlan, 'acting_for' => '1'], $delegateCsrf)['status'],
+    'Open delegation cannot bypass the latest-plan constraint');
+same(200, $planner->post('delegate-approval', ['id' => $latestPlan, 'kind' => 'plan'] + $assignment, $plannerCsrf)['status'],
+    'Scoped delegation also supports the latest material plan');
+$approvedPlan = $delegate->post('approve-plan', ['id' => $latestPlan, 'acting_for' => '1'], $delegateCsrf);
+same('approved', $approvedPlan['body']['state'], 'Buyer can approve the assigned MRP run');
+same($delegateId, (int) $db->row('SELECT approved_by FROM mrp_runs WHERE org_id=? AND id=?', [$pilot, $latestPlan])['approved_by'],
+    'MRP approval persists the actual operator in addition to the audit event');
+
+$pendingPlan = $pilotPlanning->calculate('pilot-delegate-pending', $day, $day, Planning::POLICY)['run_id'];
+$planner->post('delegate-approval', ['id' => $pendingPlan, 'kind' => 'plan'] + $assignment, $plannerCsrf);
 $pilotRecord = $planner->get($workUrl)['body'];
 same(180, $pilotRecord['tables'][0]['rows'][0]['standard_seconds'], 'Work order snapshots standard engineering time');
 same(true, in_array($bomUrl, array_column($pilotRecord['links'], 'url'), true), 'Work order links to its original BOM revision');
@@ -633,6 +724,9 @@ same(false, str_contains(Value::json($audit), $password), 'The audit excludes se
 same(200, $client->post('set-membership', ['user' => $memberId, 'role' => 'planner', 'enabled' => 0], $csrf)['status'],
     'An administrator can revoke a previously granted role');
 same(401, $planner->get('/?page=capacity')['status'], 'Revoking the last ledger role invalidates the active session on the next request');
+same(403, $delegate->post('approve-plan', ['id' => $pendingPlan, 'acting_for' => '1'], $delegateCsrf)['status'],
+    'A delegation cannot outlive the delegating planner’s role');
+same([], $delegate->get('/?page=home')['body']['tables'], 'Inactive grantors leave no actionable inbox entry');
 
 $logout = $client->post('logout', [], $csrf);
 same(false, $logout['body']['authenticated'], 'Logout invalidates current identity');

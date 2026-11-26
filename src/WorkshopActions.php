@@ -31,7 +31,7 @@ final class WorkshopActions extends Service
         $id = WebInput::id($input, 'id');
         $work = new WorkOrders($this->db, $this->scope);
         [$result, $message] = match ($action) {
-            'approve-work' => [$work->approve($id), '工单已批准。'],
+            'approve-work' => [$work->approve($id, WebInput::stringParameter($input, 'acting_for') === '1'), '工单已批准。'],
             'release-work' => [$work->release($id), '工单已下达。'],
             'pause-work' => [$work->pause($id, WebInput::stringParameter($input, 'reason')), '工单已挂起。'],
             'resume-work' => [$work->resume($id), '工单已恢复。'],

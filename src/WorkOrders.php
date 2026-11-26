@@ -45,17 +45,17 @@ final class WorkOrders extends Service
             }), 'planner');
     }
 
-    public function approve(int $id): array
+    public function approve(int $id, bool $actingFor = false): array
     {
-        return $this->mutate(function (int $org) use ($id): array {
+        return (new ApprovalDelegations($this->db, $this->scope))->approve('work', $id, $actingFor, function (int $org, array $facts) use ($id): array {
             $work = (new WorkOrderLedger($this->db, $this->scope))->order($id);
             Value::assert(in_array($work['state'], ['draft', 'approved'], true), '此状态无法审核工单。', 409);
             if ($work['state'] === 'draft') {
                 $this->setState($org, $id, 'approved');
-                $this->audit('work.approved', $id, []);
+                $this->audit('work.approved', $id, $facts);
             }
             return ['work_id' => $id, 'state' => 'approved'];
-        }, 'planner');
+        });
     }
 
     public function release(int $id): array

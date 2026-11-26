@@ -33,7 +33,7 @@ final class Workspace extends WorkspaceScreen
         $id = isset($parameters['id']) ? WebInput::integer($parameters['id'], '对象编号') : null;
         $before = isset($parameters['before']) ? WebInput::integer($parameters['before'], '分页游标') : PHP_INT_MAX;
         $screen = match ($page) {
-            'home' => $this->home(),
+            'home' => $this->home($parameters),
             'sales' => (new SalesWorkspace($this->db, $this->scope))->screen($id, $before, WebInput::optionalId($parameters, 'demand')),
             'planning' => $this->planning($id, $before, WebInput::stringParameter($parameters, 'ref'),
                 WebInput::stringParameter($parameters, 'after'), WebInput::stringParameter($parameters, 'diff_after')),
@@ -60,7 +60,7 @@ final class Workspace extends WorkspaceScreen
         return $screen;
     }
 
-    private function home(): array
+    private function home(array $parameters): array
     {
         $queues = [];
         $org = $this->scope->org;
@@ -94,6 +94,14 @@ final class Workspace extends WorkspaceScreen
             $cards[] = ['label' => $label, 'value' => (int) $row['total'], 'url' => WebView::url($page)];
         }
         $screen = ['title' => '工作台', 'cards' => $cards, 'tables' => []];
+        $approvals = new ApprovalWorkspace($this->db, $this->scope);
+        foreach (['plan', 'work'] as $kind) {
+            $before = WebInput::optionalId($parameters, $kind . '_before') ?? PHP_INT_MAX;
+            $table = $approvals->inbox($kind, $before);
+            if ($table['rows'] !== []) {
+                $screen['tables'][] = $table;
+            }
+        }
         $demo = (new DemoScenario($this->db))->lookup($this->scope);
         if ($demo === null) {
             return $screen;
@@ -146,12 +154,11 @@ final class Workspace extends WorkspaceScreen
             array_unshift($tables, $this->table('供需关联详情', ['source_kind' => '来源', 'source_id' => '记录号',
                 'available_on' => '可用日期', 'qty_milli' => '冲抵数量'], $planning->pegging($id, $ref)));
         }
-        $forms = $run['state'] === 'review' && $this->scope->can('planner')
-            ? [$this->form('批准计划', 'approve-plan', [], ['id' => $id], '批准后可将未被占用的建议转成正式采购单或工单。')] : [];
-        return ['title' => '计划运行 #' . $id, 'parent' => ['planning', '物料需求计划'], 'forms' => $forms, 'details' => [
+        $approval = (new ApprovalWorkspace($this->db, $this->scope))->controls('plan', $id, '批准后可将未被占用的建议转成正式采购单或工单。');
+        return ['title' => '计划运行 #' . $id, 'parent' => ['planning', '物料需求计划'], 'forms' => $approval['forms'], 'details' => [
             '状态' => WebView::state($run['state']), '基准日期' => $run['as_of'], '需求截点' => $run['horizon_on'],
             '策略' => $run['policy'], '根需求' => $run['stats']['roots'], '建议数' => $run['stats']['proposals'],
-        ], 'tables' => $tables];
+        ] + $approval['details'], 'tables' => $tables];
     }
 
     private function jobs(?int $id, int $before, ?int $row, int $after, array $parameters): array
@@ -227,7 +234,18 @@ final class Workspace extends WorkspaceScreen
             }
         }
         if ($job['state'] !== 'cancelled' && (isset($job['counts']['rejected']) || isset($job['counts']['retryable']))) {
-            $forms[] = $this->form('按原输入重试失败行', 'retry-job', [], ['id' => $id], '如需修正某行，先进入该行的执行记录。');
+            $options = [];
+            foreach ($list['rows'] as $line) {
+                if (in_array($line['state'], ['rejected', 'retryable'], true) && (int) $line['attempts'] < 100) {
+                    $options[$line['row_no']] = '第 ' . $line['row_no'] . ' 行 · ' . $line['error_text'];
+                }
+            }
+            if ($options !== []) {
+                $forms[] = $this->requestForm('按原输入重试选中行', 'retry-job-selection', [
+                    $this->field('rows', '本页可重试的失败行', 'select', ['options' => $options, 'multiple' => true]),
+                ], ['id' => $id, 'after' => $after], '如需修正输入，先进入该行的执行记录。');
+            }
+            $forms[] = $this->form('按原输入重试全部失败行', 'retry-job', [], ['id' => $id], '已成功的行保留原结果。');
         }
         if (isset($job['counts']['pending']) || isset($job['counts']['waiting_external'])) {
             $forms[] = $this->form('取消等待中的行', 'cancel-job', [], ['id' => $id], '已成功的业务记录继续有效。');

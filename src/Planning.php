@@ -45,19 +45,19 @@ final class Planning extends Service
             }), 'planner');
     }
 
-    public function approve(int $run): array
+    public function approve(int $run, bool $actingFor = false): array
     {
-        return $this->mutate(function (int $org) use ($run): array {
+        return (new ApprovalDelegations($this->db, $this->scope))->approve('plan', $run, $actingFor, function (int $org, array $facts) use ($run): array {
             $row = $this->runRecord($run);
             Value::assert($this->latest($org) === $run, '请审阅本账套最新的计划运行。', 409);
             if ($row['state'] !== 'approved') {
                 $this->db->run("UPDATE mrp_runs SET state='superseded' WHERE org_id=? AND id<>? AND state<>'superseded'", [$org, $run]);
                 $this->db->run("UPDATE mrp_runs SET state='approved',approved_by=?,approved_at=UTC_TIMESTAMP(6) WHERE org_id=? AND id=?",
                     [$this->scope->user, $org, $run]);
-                $this->audit('mrp.approved', $run, ['accepted_prior_run_id' => $row['prior_id']]);
+                $this->audit('mrp.approved', $run, ['accepted_prior_run_id' => $row['prior_id']] + $facts);
             }
             return ['run_id' => $run, 'state' => 'approved'];
-        }, 'planner');
+        });
     }
 
     public function runs(int $before = PHP_INT_MAX): array

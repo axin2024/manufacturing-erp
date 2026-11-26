@@ -136,7 +136,7 @@ final class WebApp
         if ($this->json) {
             $this->respond($outcome['result'], $outcome['status'] ?? 200);
         } else {
-            $this->session->flash(['message' => $outcome['message']]);
+            $this->session->flash(['message' => $outcome['message'], 'details' => $outcome['details'] ?? []]);
             $this->redirect($outcome['target']);
         }
     }

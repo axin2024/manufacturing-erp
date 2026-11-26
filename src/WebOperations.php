@@ -8,6 +8,7 @@ final class WebOperations extends Service
 {
     private const RECEIPT_ROLES = [
         'jobs.enqueue' => ['planner','warehouse'],
+        'jobs.retry_selection' => ['planner','warehouse'],
         'stock.opening' => ['warehouse'],
         'stock.transfer' => ['warehouse'],
         'sales.create' => ['sales'],
@@ -44,9 +45,11 @@ final class WebOperations extends Service
             'freeze-sale' => $this->freezeSale($input),
             'calculate-plan' => $this->calculatePlan($input),
             'approve-plan' => $this->approvePlan($input),
+            'delegate-approval', 'revoke-approval' => $this->changeDelegation($action, $input),
             'enqueue-job' => $this->enqueueJob($input),
             'watch-receipt' => $this->watchReceipt($input),
             'retry-job' => $this->retryJob($input),
+            'retry-job-selection' => $this->retryJobSelection($input),
             'cancel-job' => $this->cancelJob($input),
             'create-purchase', 'issue-purchase', 'stop-purchase', 'receive-purchase',
             'create-rfq', 'record-quote', 'award-rfq', 'decide-inspection'
@@ -77,7 +80,7 @@ final class WebOperations extends Service
             WHERE org_id=? AND actor_id=? AND kind=? AND request_key=?', [$this->scope->org, $this->scope->user, $operation, $key]);
         Value::assert($row !== null, '未找到此请求的有效回执。', 404);
         $result = Value::fromJson($row['result']);
-        if ($operation === 'jobs.enqueue') {
+        if (in_array($operation, ['jobs.enqueue', 'jobs.retry_selection'], true)) {
             Value::assert($this->scope->can(BatchJobs::ROLES[$result['kind']]), '未找到此请求的有效回执。', 404);
         }
         if ($operation === 'vendor.recover') {
@@ -106,8 +109,24 @@ final class WebOperations extends Service
     private function approvePlan(array $input): array
     {
         $id = WebInput::integer($input['id'] ?? null, '计划运行号');
-        $result = (new Planning($this->db, $this->scope))->approve($id);
+        $actingFor = WebInput::stringParameter($input, 'acting_for') === '1';
+        $result = (new Planning($this->db, $this->scope))->approve($id, $actingFor);
         return ['target' => WebView::url('planning', $id), 'message' => '计划已批准。', 'result' => $result];
+    }
+
+    private function changeDelegation(string $action, array $input): array
+    {
+        $id = WebInput::id($input, 'id');
+        $kind = WebInput::stringParameter($input, 'kind');
+        $delegations = new ApprovalDelegations($this->db, $this->scope);
+        if ($action === 'delegate-approval') {
+            $result = $delegations->assign($kind, $id, WebInput::id($input, 'delegate_id'), WebInput::integer($input['hours'] ?? null, '委托期限', 1, 168));
+            $message = '已加入代办人的工作台。';
+        } else {
+            $result = $delegations->revoke($kind, $id);
+            $message = '审批委托已撤销。';
+        }
+        return ['target' => WebView::url($kind === 'plan' ? 'planning' : 'work', $id), 'message' => $message, 'result' => $result];
     }
 
     private function enqueueJob(array $input): array
@@ -150,5 +169,23 @@ final class WebOperations extends Service
         $id = WebInput::integer($input['id'] ?? null, '任务号');
         $result = (new BatchJobs($this->db, $this->scope))->cancel($id);
         return ['target' => WebView::url('jobs', $id), 'message' => '等待中的行已取消。', 'result' => $result];
+    }
+
+    private function retryJobSelection(array $input): array
+    {
+        $id = WebInput::id($input, 'id');
+        $rows = $input['rows'] ?? null;
+        Value::assert(is_array($rows) && array_is_list($rows) && count($rows) >= 1 && count($rows) <= 100, '请选择 1 至 100 个任务行。');
+        $selection = array_map(fn(mixed $row): int => WebInput::integer($row, '重试行号'), $rows);
+        $after = WebInput::integer($input['after'] ?? 0, '任务分页游标', 0);
+        $key = WebInput::stringParameter($input, 'request_key');
+        $result = (new BatchJobs($this->db, $this->scope))->retrySelection($id, $key, $selection);
+        $message = '重新排队 ' . $result['requeued_rows'] . ' 行，保留本次选集的处理结果。';
+        $details = array_map(static function (array $line): string {
+            $state = $line['previous_state'] === null ? '' : '（原状态 ' . WebView::state($line['previous_state']) . '）';
+            return '第 ' . $line['row_no'] . ' 行 · ' . ($line['reason'] ?? '已排队') . $state;
+        }, $result['rows']);
+        $target = WebView::url('jobs', $id, $after === 0 ? [] : ['after' => $after]);
+        return ['target' => $target, 'message' => $message, 'details' => $details, 'result' => $result + ['request_key' => $key]];
     }
 }
